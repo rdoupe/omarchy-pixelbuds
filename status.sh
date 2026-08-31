@@ -24,8 +24,17 @@ if ! command -v pbpctrl >/dev/null 2>&1; then
   exit 0
 fi
 
+# pbpctrl opens its own RFCOMM session, and doing that against a device that
+# is mid-disconnect re-establishes the link — the plugin must never be the
+# reason the buds refuse to let go. So re-verify the link right before
+# talking, and treat a failure followed by a gone link as a plain disconnect
+# (a later connected=0 overrides the connected=1 printed above).
+is_conn() { bluetoothctl info "$addr" 2>/dev/null | grep -q "Connected: yes"; }
+
+is_conn || { echo "connected=0"; exit 0; }
+
 rt=$(timeout 6 pbpctrl -d "$addr" show runtime 2>/dev/null) || {
-  echo "error=pbpctrl show runtime failed"
+  if is_conn; then echo "error=pbpctrl show runtime failed"; else echo "connected=0"; fi
   exit 0
 }
 
@@ -74,6 +83,9 @@ echo "anc=${anc:-unknown}"
 # only when the popup wants them. Every read is best-effort — a control the
 # firmware doesn't answer for emits nothing, and the popup renders no row.
 [ "${1:-}" = "--controls" ] || exit 0
+
+# Same guard before the burst of control reads: never chase a leaving device.
+is_conn || exit 0
 
 for k in multipoint ohd speech-detection volume-exposure-notifications volume-eq mono; do
   v=$(timeout 6 pbpctrl -d "$addr" get "$k" 2>/dev/null | head -n1)

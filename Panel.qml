@@ -239,8 +239,18 @@ Panel {
     running: true
     stdout: SplitParser {
       onRead: function(line) {
-        if (line.indexOf("'Connected'") >= 0 || line.indexOf("'ServicesResolved'") >= 0)
+        if (line.indexOf("'Connected': <false>") >= 0) {
+          // A disconnect. Drop everything queued so no pbpctrl call opens a
+          // fresh RFCOMM session and yanks the buds right back; one cheap
+          // status pass (bluetoothctl only) updates the UI.
+          root.opQueue = []
+          rfcommFollowUp.stop()
+          root.disconnectEvent = true
           eventDebounce.restart()
+        } else if (line.indexOf("'Connected'") >= 0 || line.indexOf("'ServicesResolved'") >= 0) {
+          root.disconnectEvent = false
+          eventDebounce.restart()
+        }
       }
     }
     onExited: monitorRestart.start()
@@ -250,10 +260,14 @@ Panel {
     interval: 3000
     onTriggered: bluezMonitor.running = true
   }
+  property bool disconnectEvent: false
   Timer {
     id: eventDebounce
     interval: 400
-    onTriggered: { root.refresh(); rfcommFollowUp.restart() }
+    onTriggered: {
+      root.refresh()
+      if (!root.disconnectEvent) rfcommFollowUp.restart()
+    }
   }
   // The buds' RFCOMM channel isn't up the instant BlueZ says Connected, so the
   // first status pass often has no battery/ANC; one delayed pass fills it in.
