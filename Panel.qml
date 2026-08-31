@@ -509,7 +509,7 @@ Panel {
 
         Item {
           id: advancedHeader
-          visible: !root.missingPbpctrl && Object.keys(root.controls).length > 0
+          visible: !root.missingPbpctrl
           width: parent.width
           implicitHeight: advLabel.implicitHeight + Style.space(4)
 
@@ -527,7 +527,10 @@ Panel {
           MouseArea {
             anchors.fill: parent
             cursorShape: Qt.PointingHandCursor
-            onClicked: root.advancedOpen = !root.advancedOpen
+            onClicked: {
+              root.advancedOpen = !root.advancedOpen
+              if (root.advancedOpen && Object.keys(root.controls).length === 0) root.refreshControls()
+            }
           }
         }
 
@@ -535,6 +538,15 @@ Panel {
           visible: root.advancedOpen && advancedHeader.visible
           width: parent.width
           spacing: Style.space(6)
+
+          Text {
+            visible: Object.keys(root.controls).length === 0
+            width: parent.width
+            text: controlsProc.running ? "Reading device settings…" : "The buds reported no adjustable settings."
+            color: Qt.darker(root.fg, 1.4)
+            font.family: root.fontFamily
+            font.pixelSize: Style.font.bodySmall
+          }
 
           ToggleRow { label: "Multipoint audio"; ctlKey: "multipoint"; statusKey: "ctl_multipoint" }
           ToggleRow { label: "Speech detection"; ctlKey: "speech-detection"; statusKey: "ctl_speech_detection" }
