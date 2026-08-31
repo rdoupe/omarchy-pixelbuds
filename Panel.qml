@@ -504,45 +504,18 @@ Panel {
           }
         }
 
-        // ---------- Device toggles (only rows the buds answered for) ----------
-        PanelSeparator { visible: deviceCol.visible; foreground: root.fg }
-
-        Column {
-          id: deviceCol
-          visible: !root.missingPbpctrl && (root.controls.ctl_multipoint !== undefined
-              || root.controls.ctl_speech_detection !== undefined
-              || root.controls.ctl_ohd !== undefined
-              || root.controls.ctl_volume_exposure_notifications !== undefined)
-          width: parent.width
-          spacing: Style.space(6)
-
-          PanelSectionHeader {
-            text: "DEVICE"
-            foreground: root.fg
-            fontFamily: root.fontFamily
-          }
-
-          ToggleRow { label: "Multipoint audio"; ctlKey: "multipoint"; statusKey: "ctl_multipoint" }
-          ToggleRow { label: "Speech detection"; ctlKey: "speech-detection"; statusKey: "ctl_speech_detection" }
-          ToggleRow { label: "On-head detection"; ctlKey: "ohd"; statusKey: "ctl_ohd" }
-          ToggleRow { label: "Volume level alerts"; ctlKey: "volume-exposure-notifications"; statusKey: "ctl_volume_exposure_notifications" }
-        }
-
-        // ---------- Advanced sound (collapsed by default) ----------
+        // ---------- Advanced (collapsed): device toggles + sound ----------
         PanelSeparator { visible: advancedHeader.visible; foreground: root.fg }
 
         Item {
           id: advancedHeader
-          visible: !root.missingPbpctrl && (root.controls.ctl_volume_eq !== undefined
-              || root.controls.ctl_mono !== undefined
-              || root.controls.ctl_balance !== undefined
-              || root.controls.ctl_eq !== undefined)
+          visible: !root.missingPbpctrl && Object.keys(root.controls).length > 0
           width: parent.width
           implicitHeight: advLabel.implicitHeight + Style.space(4)
 
           Text {
             id: advLabel
-            text: (root.advancedOpen ? "▾" : "▸") + "  SOUND"
+            text: (root.advancedOpen ? "▾" : "▸") + "  ADVANCED"
             color: Qt.darker(root.fg, 1.4)
             font.family: root.fontFamily
             font.pixelSize: Style.font.caption
@@ -562,6 +535,21 @@ Panel {
           visible: root.advancedOpen && advancedHeader.visible
           width: parent.width
           spacing: Style.space(6)
+
+          ToggleRow { label: "Multipoint audio"; ctlKey: "multipoint"; statusKey: "ctl_multipoint" }
+          ToggleRow { label: "Speech detection"; ctlKey: "speech-detection"; statusKey: "ctl_speech_detection" }
+          ToggleRow { label: "On-head detection"; ctlKey: "ohd"; statusKey: "ctl_ohd" }
+          ToggleRow { label: "Volume level alerts"; ctlKey: "volume-exposure-notifications"; statusKey: "ctl_volume_exposure_notifications" }
+
+          PanelSectionHeader {
+            visible: root.controls.ctl_volume_eq !== undefined
+                || root.controls.ctl_mono !== undefined
+                || root.controls.ctl_balance !== undefined
+                || root.controls.ctl_eq !== undefined
+            text: "SOUND"
+            foreground: root.fg
+            fontFamily: root.fontFamily
+          }
 
           ToggleRow { label: "Volume EQ"; ctlKey: "volume-eq"; statusKey: "ctl_volume_eq" }
           ToggleRow { label: "Mono audio"; ctlKey: "mono"; statusKey: "ctl_mono" }
