@@ -29,10 +29,10 @@ thing.
 ## Requirements
 
 - the `pbpctrl` package from the AUR. If your Pixel Buds connect while it is
-  missing, the bar icon shows in the urgent color and the popup offers a
-  one-click install: it opens Omarchy's floating terminal running
-  `omarchy-pkg-aur-add pbpctrl`, where sudo prompts for your password as
-  usual. Nothing is ever installed without that click and prompt.
+  missing, the bar icon shows in the urgent color and the popup explains,
+  showing the install command with a button that copies it to your clipboard
+  — paste it into a terminal to install. The plugin itself never installs
+  software and never elevates privileges.
 - BlueZ (`bluetoothctl`) and glib2 (`gdbus`) — both ship with Omarchy.
 - Pixel Buds supported by `pbpctrl` (Pixel Buds Pro generation).
 

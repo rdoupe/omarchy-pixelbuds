@@ -104,12 +104,16 @@ Panel {
     if (controlsQueued) { controlsQueued = false; refreshControls() }
   }
 
-  // The floating terminal is the one place sudo can prompt, so the install
-  // goes through the stock presentation wrapper like the menu's installers.
-  function installPbpctrl() {
-    if (bar) bar.run("omarchy-launch-floating-terminal-with-presentation omarchy-pkg-aur-add pbpctrl")
-    close()
+  // The plugin never installs anything and never elevates: this only puts
+  // the documented install command on the clipboard for the user to run in
+  // their own terminal.
+  property bool installCmdCopied: false
+  function copyInstallCommand() {
+    Quickshell.execDetached(["wl-copy", "omarchy pkg aur add pbpctrl"])
+    installCmdCopied = true
+    copiedReset.restart()
   }
+  Timer { id: copiedReset; interval: 4000; onTriggered: root.installCmdCopied = false }
 
   function setAnc(mode) {
     if (!connected || missingPbpctrl || actionProc.running) return
@@ -420,22 +424,31 @@ Panel {
           Text {
             width: parent.width
             wrapMode: Text.WordWrap
-            text: "Battery levels and listening-mode control come from the pbpctrl CLI, which is packaged in the AUR."
+            text: "Battery levels and listening-mode control come from the pbpctrl CLI, which is packaged in the AUR. Run in a terminal:"
             color: Qt.darker(root.fg, 1.4)
+            font.family: root.fontFamily
+            font.pixelSize: Style.font.bodySmall
+          }
+
+          Text {
+            width: parent.width
+            text: "omarchy pkg aur add pbpctrl"
+            color: root.fg
             font.family: root.fontFamily
             font.pixelSize: Style.font.bodySmall
           }
 
           Button {
             width: parent.width
-            text: "Install pbpctrl from the AUR"
+            text: root.installCmdCopied ? "Copied — paste it in a terminal" : "Copy the install command"
             fontSize: Style.font.bodySmall
             foreground: root.fg
             fontFamily: root.fontFamily
             horizontalPadding: Style.spacing.controlPaddingX
             verticalPadding: Style.spacing.controlPaddingY + Style.space(2)
             bordered: true
-            onClicked: root.installPbpctrl()
+            active: root.installCmdCopied
+            onClicked: root.copyInstallCommand()
           }
         }
 
