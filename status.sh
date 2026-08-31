@@ -68,3 +68,31 @@ fi
 
 anc=$(timeout 6 pbpctrl -d "$addr" get anc 2>/dev/null | head -n1)
 echo "anc=${anc:-unknown}"
+
+# Optional second pass (--controls): device toggles and sound tuning, read
+# only when the popup wants them. Every read is best-effort — a control the
+# firmware doesn't answer for emits nothing, and the popup renders no row.
+[ "${1:-}" = "--controls" ] || exit 0
+
+for k in multipoint ohd speech-detection volume-exposure-notifications volume-eq mono; do
+  v=$(timeout 6 pbpctrl -d "$addr" get "$k" 2>/dev/null | head -n1)
+  case "$v" in
+    true|false) echo "ctl_$(printf '%s' "$k" | tr - _)=$v" ;;
+  esac
+done
+
+# "left: 100%, right: 80%" -> -100..100 (negative = toward the left)
+bal=$(timeout 6 pbpctrl -d "$addr" get balance 2>/dev/null | head -n1)
+case "$bal" in
+  left:*)
+    l=${bal#left: }; l=${l%%\%*}
+    r=${bal##*right: }; r=${r%\%}
+    echo "ctl_balance=$((r - l))"
+    ;;
+esac
+
+# "[0.00, 1.50, ...]" -> comma-joined five bands
+eqv=$(timeout 6 pbpctrl -d "$addr" get eq 2>/dev/null | head -n1)
+case "$eqv" in
+  \[*\]) echo "ctl_eq=$(printf '%s' "$eqv" | tr -d '[] ')" ;;
+esac

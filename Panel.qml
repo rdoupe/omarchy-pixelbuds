@@ -16,6 +16,8 @@ Panel {
   manageIpc: false
 
   property var status: ({})
+  property var controls: ({})
+  property bool advancedOpen: false
   property bool everLoaded: false
   property int ancIndex: 1
   property bool cursorActive: false
@@ -23,6 +25,9 @@ Panel {
 
   readonly property string scriptPath: String(Qt.resolvedUrl("status.sh")).replace(/^file:\/\//, "")
   readonly property int pollInterval: Math.max(5, parseInt(setting("pollIntervalSec", 30)) || 30) * 1000
+  readonly property bool hideWhenDisconnected: String(setting("hideWhenDisconnected", true)) === "true"
+  readonly property color urgentColor: bar ? bar.urgent : Color.urgent
+  readonly property var eqBands: controls.ctl_eq !== undefined ? String(controls.ctl_eq).split(",").map(Number) : []
 
   readonly property bool connected: String(status.connected || "0") === "1"
   readonly property bool missingPbpctrl: String(status.missing_pbpctrl || "0") === "1"
@@ -48,6 +53,34 @@ Panel {
   function refresh() {
     if (statusProc.running) return
     statusProc.running = true
+  }
+
+  function refreshControls() {
+    if (!connected || missingPbpctrl || controlsProc.running) return
+    controlsProc.running = true
+  }
+
+  function applyControls(raw) {
+    var next = Model.parseStatus(raw)
+    var out = {}
+    for (var k in next) if (k.indexOf("ctl_") === 0) out[k] = next[k]
+    controls = out
+  }
+
+  // addr is a bluetoothctl MAC, key a literal subcommand, args numbers/bools —
+  // nothing here is user text, so plain string assembly is safe.
+  function setControl(key, args) {
+    if (!connected || missingPbpctrl || ctlProc.running) return
+    ctlProc.command = ["sh", "-c",
+      "exec timeout 6 pbpctrl -d " + String(status.addr || "") + " set " + key + " " + args]
+    ctlProc.running = true
+  }
+
+  function setEqBand(i, v) {
+    var b = eqBands.slice()
+    if (b.length !== 5) return
+    b[i] = v
+    setControl("eq", b.map(function(x) { return Number(x).toFixed(1) }).join(" "))
   }
 
   function applyStatus(raw) {
@@ -91,7 +124,7 @@ Panel {
 
 
   function tooltip() {
-    if (!connected) return ""
+    if (!connected) return "Pixel Buds — not connected"
     if (missingPbpctrl) return budsName + " — pbpctrl is not installed"
     var parts = []
     if (leftPct >= 0) parts.push("L " + leftPct + "%")
@@ -126,6 +159,18 @@ Panel {
       if (code !== 0) root.pendingAnc = ""
       root.refresh()
     }
+  }
+
+  Process {
+    id: controlsProc
+    command: ["sh", root.scriptPath, "--controls"]
+    stdout: StdioCollector { waitForEnd: true; onStreamFinished: root.applyControls(text) }
+  }
+
+  // Whatever a set did (or failed to do), re-read the truth from the buds.
+  Process {
+    id: ctlProc
+    onExited: root.refreshControls()
   }
 
   // Connect/disconnect is event-driven: a plain signal subscription on the
@@ -178,15 +223,20 @@ Panel {
     if (opened) {
       if (!connected) { close(); return }
       refresh()
+      refreshControls()
       ancIndex = Model.ancIndex(root.anc)
       cursorActive = false
+      advancedOpen = false
     }
   }
-  onConnectedChanged: if (!connected) close()
+  onConnectedChanged: {
+    if (!connected) { close(); controls = {} }
+  }
 
-  visible: connected
-  implicitWidth: connected ? button.implicitWidth : 0
-  implicitHeight: connected ? button.implicitHeight : 0
+  readonly property bool shown: connected || !hideWhenDisconnected
+  visible: shown
+  implicitWidth: shown ? button.implicitWidth : 0
+  implicitHeight: shown ? button.implicitHeight : 0
 
   BarIconButton {
     id: button
@@ -194,6 +244,7 @@ Panel {
     bar: root.bar
     iconComponent: caseIcon
     active: root.missingPbpctrl
+    opacity: root.connected ? 1 : 0.45
     tooltipText: root.tooltip()
     onPressed: function(b) {
       if (!root.connected) return
@@ -453,6 +504,92 @@ Panel {
           }
         }
 
+        // ---------- Device toggles (only rows the buds answered for) ----------
+        PanelSeparator { visible: deviceCol.visible; foreground: root.fg }
+
+        Column {
+          id: deviceCol
+          visible: !root.missingPbpctrl && (root.controls.ctl_multipoint !== undefined
+              || root.controls.ctl_speech_detection !== undefined
+              || root.controls.ctl_ohd !== undefined
+              || root.controls.ctl_volume_exposure_notifications !== undefined)
+          width: parent.width
+          spacing: Style.space(6)
+
+          PanelSectionHeader {
+            text: "DEVICE"
+            foreground: root.fg
+            fontFamily: root.fontFamily
+          }
+
+          ToggleRow { label: "Multipoint audio"; ctlKey: "multipoint"; statusKey: "ctl_multipoint" }
+          ToggleRow { label: "Speech detection"; ctlKey: "speech-detection"; statusKey: "ctl_speech_detection" }
+          ToggleRow { label: "On-head detection"; ctlKey: "ohd"; statusKey: "ctl_ohd" }
+          ToggleRow { label: "Volume level alerts"; ctlKey: "volume-exposure-notifications"; statusKey: "ctl_volume_exposure_notifications" }
+        }
+
+        // ---------- Advanced sound (collapsed by default) ----------
+        PanelSeparator { visible: advancedHeader.visible; foreground: root.fg }
+
+        Item {
+          id: advancedHeader
+          visible: !root.missingPbpctrl && (root.controls.ctl_volume_eq !== undefined
+              || root.controls.ctl_mono !== undefined
+              || root.controls.ctl_balance !== undefined
+              || root.controls.ctl_eq !== undefined)
+          width: parent.width
+          implicitHeight: advLabel.implicitHeight + Style.space(4)
+
+          Text {
+            id: advLabel
+            text: (root.advancedOpen ? "▾" : "▸") + "  SOUND"
+            color: Qt.darker(root.fg, 1.4)
+            font.family: root.fontFamily
+            font.pixelSize: Style.font.caption
+            font.bold: true
+            font.letterSpacing: 1.2
+            anchors.verticalCenter: parent.verticalCenter
+          }
+
+          MouseArea {
+            anchors.fill: parent
+            cursorShape: Qt.PointingHandCursor
+            onClicked: root.advancedOpen = !root.advancedOpen
+          }
+        }
+
+        Column {
+          visible: root.advancedOpen && advancedHeader.visible
+          width: parent.width
+          spacing: Style.space(6)
+
+          ToggleRow { label: "Volume EQ"; ctlKey: "volume-eq"; statusKey: "ctl_volume_eq" }
+          ToggleRow { label: "Mono audio"; ctlKey: "mono"; statusKey: "ctl_mono" }
+
+          SliderRow {
+            label: "Balance"
+            visible: root.controls.ctl_balance !== undefined
+            from: -100; to: 100; step: 5
+            value: parseInt(root.controls.ctl_balance) || 0
+            format: function(v) { return v === 0 ? "center" : (v < 0 ? "L " + (-v) : "R " + v) }
+            onCommitted: function(v) { root.setControl("balance", String(v)) }
+          }
+
+          Repeater {
+            model: ["Low bass", "Bass", "Mid", "Treble", "Upper treble"]
+            SliderRow {
+              required property var modelData
+              required property int index
+              label: modelData
+              visible: root.eqBands.length === 5
+              from: -6; to: 6; step: 0.5
+              value: root.eqBands.length === 5 ? root.eqBands[index] : 0
+              format: function(v) { return v.toFixed(1) }
+              onCommitted: function(v) { root.setEqBand(index, v) }
+            }
+          }
+        }
+
         Text {
           visible: !!root.status.error && !root.missingPbpctrl
           width: parent.width
@@ -474,6 +611,8 @@ Panel {
     property bool stale: false
     property string hint: ""
 
+    readonly property bool low: level >= 0 && level <= 20 && !charging
+
     width: parent.width
     implicitHeight: labelText.implicitHeight + track.height + Style.space(6)
 
@@ -492,7 +631,7 @@ Panel {
       anchors.right: parent.right
       anchors.top: parent.top
       text: (row.level >= 0 ? row.level + "%" : "—") + "  " + Model.batteryIcon(row.level, row.charging)
-      color: root.fg
+      color: row.low ? root.urgentColor : root.fg
       opacity: row.stale ? 0.5 : 1.0
       font.family: root.fontFamily
       font.pixelSize: Style.font.bodySmall
@@ -512,7 +651,7 @@ Panel {
         anchors.verticalCenter: parent.verticalCenter
         height: parent.height
         radius: parent.radius
-        color: root.fg
+        color: row.low ? root.urgentColor : root.fg
         opacity: row.stale ? 0.4 : 1.0
         width: row.level >= 0 ? Math.max(parent.height, parent.width * row.level / 100) : 0
         Behavior on width { NumberAnimation { duration: 320; easing.type: Easing.OutCubic } }
@@ -523,6 +662,127 @@ Panel {
           alwaysRunToEnd: true
           NumberAnimation { from: 1.0; to: 0.55; duration: 950; easing.type: Easing.InOutSine }
           NumberAnimation { from: 0.55; to: 1.0; duration: 950; easing.type: Easing.InOutSine }
+        }
+      }
+    }
+  }
+
+  // A label with an On/Off button, shown only when the buds reported a state
+  // for it — an unanswered control renders nothing at all.
+  component ToggleRow: Item {
+    id: trow
+    property string label: ""
+    property string ctlKey: ""
+    property string statusKey: ""
+    readonly property bool known: root.controls[statusKey] !== undefined
+    readonly property bool on: String(root.controls[statusKey] || "false") === "true"
+
+    visible: known
+    width: parent.width
+    implicitHeight: known ? toggleBtn.implicitHeight : 0
+
+    Text {
+      anchors.left: parent.left
+      anchors.verticalCenter: parent.verticalCenter
+      text: trow.label
+      color: root.fg
+      opacity: 0.8
+      font.family: root.fontFamily
+      font.pixelSize: Style.font.bodySmall
+    }
+
+    Button {
+      id: toggleBtn
+      anchors.right: parent.right
+      anchors.verticalCenter: parent.verticalCenter
+      text: trow.on ? "On" : "Off"
+      fontSize: Style.font.bodySmall
+      foreground: root.fg
+      fontFamily: root.fontFamily
+      horizontalPadding: Style.spacing.controlPaddingX
+      verticalPadding: Style.spacing.controlPaddingY
+      bordered: true
+      active: trow.on
+      enabled: !ctlProc.running
+      opacity: enabled ? 1.0 : 0.5
+      onClicked: root.setControl(trow.ctlKey, trow.on ? "false" : "true")
+    }
+  }
+
+  // Drag-to-set slider; the value is committed to the buds on release and
+  // then re-read, so the row always ends up showing the device's truth.
+  component SliderRow: Item {
+    id: srow
+    property string label: ""
+    property real from: 0
+    property real to: 100
+    property real step: 1
+    property real value: 0
+    property var format: function(v) { return String(Math.round(v)) }
+    signal committed(real v)
+
+    property bool dragging: false
+    property real dragVal: 0
+    readonly property real shownVal: dragging ? dragVal : value
+
+    width: parent.width
+    implicitHeight: sliderLabel.implicitHeight + strack.height + Style.space(6)
+
+    function valueAt(x) {
+      var t = Math.max(0, Math.min(1, x / strack.width))
+      var v = from + t * (to - from)
+      v = Math.round(v / step) * step
+      return Math.max(from, Math.min(to, v))
+    }
+
+    Text {
+      id: sliderLabel
+      anchors.left: parent.left
+      anchors.top: parent.top
+      text: srow.label
+      color: root.fg
+      opacity: 0.8
+      font.family: root.fontFamily
+      font.pixelSize: Style.font.bodySmall
+    }
+
+    Text {
+      anchors.right: parent.right
+      anchors.top: parent.top
+      text: srow.format(srow.shownVal)
+      color: root.fg
+      font.family: root.fontFamily
+      font.pixelSize: Style.font.bodySmall
+    }
+
+    Rectangle {
+      id: strack
+      anchors.left: parent.left
+      anchors.right: parent.right
+      anchors.bottom: parent.bottom
+      height: Style.space(6)
+      radius: height / 2
+      color: Qt.rgba(root.fg.r, root.fg.g, root.fg.b, 0.12)
+
+      Rectangle {
+        anchors.left: parent.left
+        anchors.verticalCenter: parent.verticalCenter
+        height: parent.height
+        radius: parent.radius
+        color: root.fg
+        width: Math.max(parent.height, parent.width * (srow.shownVal - srow.from) / (srow.to - srow.from))
+      }
+
+      MouseArea {
+        anchors.fill: parent
+        anchors.margins: -Style.space(6)
+        enabled: !ctlProc.running
+        onPressed: function(mouse) { srow.dragging = true; srow.dragVal = srow.valueAt(mouse.x + Style.space(6)) }
+        onPositionChanged: function(mouse) { if (srow.dragging) srow.dragVal = srow.valueAt(mouse.x + Style.space(6)) }
+        onReleased: {
+          if (!srow.dragging) return
+          srow.dragging = false
+          if (srow.dragVal !== srow.value) srow.committed(srow.dragVal)
         }
       }
     }

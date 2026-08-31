@@ -13,6 +13,12 @@ Pixel Buds battery and listening-mode control, right in the Omarchy bar.
   clickable or keyboard-navigable.
 - **Quick ANC cycling**: right- or middle-click the bar icon to cycle modes
   without opening the panel.
+- **Device toggles**: multipoint audio, speech detection (auto-transparency
+  while you talk), on-head detection, and volume level alerts. Rows are
+  capability-gated — a control only appears if your buds answer for it.
+- **Advanced sound**, tucked behind a collapsed section: volume-dependent EQ,
+  mono audio, balance, and the 5-band EQ.
+- **Low battery** turns a battery row the urgent color at 20% or less.
 - **Event-driven**: subscribes to BlueZ D-Bus signals via `gdbus`, so the icon
   appears within about a second of the buds connecting — and while they're
   disconnected the plugin polls nothing at all.
@@ -51,6 +57,7 @@ you can delete freely.
 | Setting | Default | Meaning |
 |---------|---------|---------|
 | `pollIntervalSec` | 30 | Battery/ANC poll interval while connected (the panel polls faster while open) |
+| `hideWhenDisconnected` | true | Hide the bar icon entirely while no Pixel Buds are connected; set false to keep a dimmed icon |
 
 Configure via the bar widget settings or directly in
 `~/.config/omarchy/shell.json`.
