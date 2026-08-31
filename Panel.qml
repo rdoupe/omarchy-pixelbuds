@@ -87,12 +87,12 @@ Panel {
       if (!connected || missingPbpctrl) { opDone(); return }
       controlsProc.running = true
     } else if (op[0] === "set") {
-      ctlProc.command = ["sh", "-c",
-        "exec timeout 6 pbpctrl -d " + String(status.addr || "") + " set " + op[1] + " -- " + op[2]]
+      ctlProc.command = ["timeout", "6", "pbpctrl", "-d", String(status.addr || ""),
+        "set", op[1], "--"].concat(String(op[2]).split(" "))
       ctlProc.running = true
     } else {
-      actionProc.command = ["sh", "-c",
-        'exec timeout 6 pbpctrl -d "$1" set anc "$2"', "sh", String(status.addr || ""), op[1]]
+      actionProc.command = ["timeout", "6", "pbpctrl", "-d", String(status.addr || ""),
+        "set", "anc", op[1]]
       actionProc.running = true
     }
   }
@@ -115,10 +115,9 @@ Panel {
     controls = out
   }
 
-  // addr is a bluetoothctl MAC, key a literal subcommand, args numbers/bools —
-  // nothing here is user text, so plain string assembly is safe. The "--"
-  // keeps negative values (balance, EQ) from parsing as flags. Every set is
-  // followed by a controls re-read so the UI shows the device's truth.
+  // Sets run as plain argv — no shell anywhere. The "--" keeps negative
+  // values (balance, EQ) from parsing as flags. Every set is followed by a
+  // controls re-read so the UI shows the device's truth.
   function setControl(key, args) {
     if (!connected || missingPbpctrl) return
     enqueue(["set", key, args])
@@ -399,6 +398,8 @@ Panel {
           implicitHeight: Math.max(heroIcon.implicitHeight, heroLabels.implicitHeight, heroPercent.implicitHeight)
 
           Text {
+
+            textFormat: Text.PlainText
             id: heroIcon
             text: Model.ancIcon(root.anc)
             color: root.fg
@@ -418,6 +419,8 @@ Panel {
             spacing: Style.space(2)
 
             Text {
+
+              textFormat: Text.PlainText
               text: root.budsName
               color: root.fg
               font.family: root.fontFamily
@@ -428,6 +431,8 @@ Panel {
             }
 
             Text {
+
+              textFormat: Text.PlainText
               text: (root.missingPbpctrl ? "pbpctrl is not installed"
                   : root.pendingAnc !== "" ? "Switching to " + Model.ancLabel(root.anc)
                   : Model.ancLabel(root.anc)).toUpperCase()
@@ -442,6 +447,8 @@ Panel {
           }
 
           Text {
+
+            textFormat: Text.PlainText
             id: heroPercent
             text: root.minPct >= 0 ? root.minPct + "%" : "—"
             color: root.fg
@@ -460,6 +467,8 @@ Panel {
           spacing: Style.space(10)
 
           Text {
+
+            textFormat: Text.PlainText
             width: parent.width
             wrapMode: Text.WordWrap
             text: "Battery levels and listening-mode control come from the pbpctrl CLI, which is packaged in the AUR. Run in a terminal:"
@@ -469,6 +478,8 @@ Panel {
           }
 
           Text {
+
+            textFormat: Text.PlainText
             width: parent.width
             text: "omarchy pkg aur add pbpctrl"
             color: root.fg
@@ -575,6 +586,8 @@ Panel {
           implicitHeight: advLabel.implicitHeight + Style.space(4)
 
           Text {
+
+            textFormat: Text.PlainText
             id: advLabel
             text: (root.advancedOpen ? "▾" : "▸") + "  ADVANCED"
             color: Qt.darker(root.fg, 1.4)
@@ -601,6 +614,8 @@ Panel {
           spacing: Style.space(6)
 
           Text {
+
+            textFormat: Text.PlainText
             visible: Object.keys(root.controls).length === 0
             width: parent.width
             text: controlsProc.running ? "Reading device settings…" : "The buds reported no adjustable settings."
@@ -652,6 +667,8 @@ Panel {
         }
 
         Text {
+
+          textFormat: Text.PlainText
           visible: !!root.status.error && !root.missingPbpctrl
           width: parent.width
           wrapMode: Text.WordWrap
@@ -678,6 +695,8 @@ Panel {
     implicitHeight: labelText.implicitHeight + track.height + Style.space(6)
 
     Text {
+
+      textFormat: Text.PlainText
       id: labelText
       anchors.left: parent.left
       anchors.top: parent.top
@@ -689,6 +708,8 @@ Panel {
     }
 
     Text {
+
+      textFormat: Text.PlainText
       anchors.right: parent.right
       anchors.top: parent.top
       text: (row.level >= 0 ? row.level + "%" : "—") + "  " + Model.batteryIcon(row.level, row.charging)
@@ -743,6 +764,8 @@ Panel {
     implicitHeight: known ? toggleBtn.implicitHeight : 0
 
     Text {
+
+      textFormat: Text.PlainText
       anchors.left: parent.left
       anchors.verticalCenter: parent.verticalCenter
       text: trow.label
@@ -804,6 +827,8 @@ Panel {
     }
 
     Text {
+
+      textFormat: Text.PlainText
       id: sliderLabel
       anchors.left: parent.left
       anchors.top: parent.top
@@ -815,6 +840,8 @@ Panel {
     }
 
     Text {
+
+      textFormat: Text.PlainText
       anchors.right: parent.right
       anchors.top: parent.top
       text: srow.format(srow.shownVal)
