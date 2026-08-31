@@ -1,0 +1,36 @@
+{
+  "schemaVersion": 1,
+  "id": "douper.pixelbuds",
+  "name": "Pixel Buds",
+  "version": "1.1.0",
+  "author": "Ryan Doupé",
+  "license": "MIT",
+  "description": "Pixel Buds Pro in the bar: per-bud and case battery, charging/in-case state, and listening mode (ANC) switching via pbpctrl.",
+  "kinds": [
+    "bar-widget"
+  ],
+  "entryPoints": {
+    "barWidget": "Panel.qml"
+  },
+  "barWidget": {
+    "displayName": "Pixel Buds",
+    "description": "Battery per bud and case, plus Off / Noise Cancelling / Transparency / Adaptive switching.",
+    "category": "System",
+    "allowMultiple": false,
+    "defaultSection": "right",
+    "defaults": {
+      "pollIntervalSec": 30
+    },
+    "schema": [
+      {
+        "key": "pollIntervalSec",
+        "type": "integer",
+        "label": "Poll interval while the panel is closed (seconds)",
+        "min": 5,
+        "max": 600,
+        "step": 5,
+        "defaultValue": 30
+      }
+    ]
+  }
+}
