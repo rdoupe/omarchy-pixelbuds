@@ -2,7 +2,7 @@
 
 Pixel Buds battery and listening-mode control, right in the Omarchy bar.
 
-![screenshot](screenshot.png)
+![screenshot](preview.png)
 
 ## Features
 
@@ -23,7 +23,8 @@ thing.
 ## Requirements
 
 - `pbpctrl` on your `PATH` (the plugin also looks in `~/.local/bin` and
-  `~/.cargo/bin`). Install with `cargo install pbpctrl` or from the AUR.
+  `~/.cargo/bin`). It is packaged in the AUR and published on crates.io;
+  this plugin never installs it for you, it only checks that it is present.
 - BlueZ (`bluetoothctl`) and glib2 (`gdbus`) — both ship with Omarchy.
 - Pixel Buds supported by `pbpctrl` (Pixel Buds Pro generation).
 
