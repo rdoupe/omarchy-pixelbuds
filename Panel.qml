@@ -50,23 +50,62 @@ Panel {
   readonly property color fg: bar ? bar.foreground : Color.foreground
   readonly property string fontFamily: bar ? bar.fontFamily : Style.font.family
 
-  // Only one pbpctrl process may talk to the buds at a time — concurrent
-  // RFCOMM sessions make each other's reads fail — so everything below
-  // funnels through this gate, and a controls request made while status is
-  // being read runs right after it instead.
-  property bool controlsQueued: false
-  readonly property bool busy: statusProc.running || controlsProc.running
-      || actionProc.running || ctlProc.running
+  // All pbpctrl access is serialized through this op queue — concurrent
+  // RFCOMM sessions corrupt each other's reads. The gate is our own flag,
+  // never Process.running, which only turns true asynchronously after the
+  // spawn. Ops: "status", "controls", ["set", key, args], ["anc", mode].
+  // Duplicate polls collapse; a queued write is replaced by a newer one to
+  // the same target (last write wins).
+  property var opQueue: []
+  property bool opRunning: false
 
-  function refresh() {
-    if (busy) return
-    statusProc.running = true
+  function enqueue(op) {
+    var i
+    if (typeof op === "string") {
+      if (opQueue.indexOf(op) >= 0) { pump(); return }
+    } else {
+      for (i = 0; i < opQueue.length; i++) {
+        var q = opQueue[i]
+        if (typeof q !== "string" && q[0] === op[0] && (op[0] !== "set" || q[1] === op[1])) {
+          opQueue[i] = op
+          pump()
+          return
+        }
+      }
+    }
+    opQueue.push(op)
+    pump()
   }
 
+  function pump() {
+    if (opRunning || opQueue.length === 0) return
+    var op = opQueue.shift()
+    opRunning = true
+    if (op === "status") {
+      statusProc.running = true
+    } else if (op === "controls") {
+      if (!connected || missingPbpctrl) { opDone(); return }
+      controlsProc.running = true
+    } else if (op[0] === "set") {
+      ctlProc.command = ["sh", "-c",
+        "exec timeout 6 pbpctrl -d " + String(status.addr || "") + " set " + op[1] + " -- " + op[2]]
+      ctlProc.running = true
+    } else {
+      actionProc.command = ["sh", "-c",
+        'exec timeout 6 pbpctrl -d "$1" set anc "$2"', "sh", String(status.addr || ""), op[1]]
+      actionProc.running = true
+    }
+  }
+
+  function opDone() {
+    opRunning = false
+    Qt.callLater(root.pump)
+  }
+
+  function refresh() { enqueue("status") }
   function refreshControls() {
-    if (!connected || missingPbpctrl || controlsProc.running) return
-    if (busy) { controlsQueued = true; return }
-    controlsProc.running = true
+    if (!connected || missingPbpctrl) return
+    enqueue("controls")
   }
 
   function applyControls(raw) {
@@ -74,33 +113,16 @@ Panel {
     var out = {}
     for (var k in next) if (k.indexOf("ctl_") === 0) out[k] = next[k]
     controls = out
-    dispatchPending()
   }
 
   // addr is a bluetoothctl MAC, key a literal subcommand, args numbers/bools —
   // nothing here is user text, so plain string assembly is safe. The "--"
-  // keeps negative values (balance, EQ) from parsing as flags. A set that
-  // arrives while the RFCOMM link is busy waits its turn instead of failing;
-  // last write wins.
-  property var pendingCtl: null
-
+  // keeps negative values (balance, EQ) from parsing as flags. Every set is
+  // followed by a controls re-read so the UI shows the device's truth.
   function setControl(key, args) {
     if (!connected || missingPbpctrl) return
-    if (busy) { pendingCtl = [key, args]; return }
-    runCtl(key, args)
-  }
-
-  function runCtl(key, args) {
-    ctlProc.command = ["sh", "-c",
-      "exec timeout 6 pbpctrl -d " + String(status.addr || "") + " set " + key + " -- " + args]
-    ctlProc.running = true
-  }
-
-  function dispatchPending() {
-    if (pendingCtl === null || busy) return
-    var p = pendingCtl
-    pendingCtl = null
-    runCtl(p[0], p[1])
+    enqueue(["set", key, args])
+    enqueue("controls")
   }
 
   function setEqBand(i, v) {
@@ -119,8 +141,6 @@ Panel {
     // confirm it, so the buttons don't flash back to the old state.
     if (pendingAnc !== "" && String(next.anc || "") === pendingAnc) pendingAnc = ""
     if (opened && !cursorActive) ancIndex = Model.ancIndex(root.anc)
-    if (pendingCtl !== null) { dispatchPending(); return }
-    if (controlsQueued) { controlsQueued = false; refreshControls() }
   }
 
   // The plugin never installs anything and never elevates: this only puts
@@ -135,13 +155,11 @@ Panel {
   Timer { id: copiedReset; interval: 4000; onTriggered: root.installCmdCopied = false }
 
   function setAnc(mode) {
-    if (!connected || missingPbpctrl || actionProc.running) return
+    if (!connected || missingPbpctrl) return
     if (Model.ANC_MODES.indexOf(mode) < 0) return
     pendingAnc = mode
-    actionProc.command = ["sh", "-c",
-      'exec timeout 6 pbpctrl -d "$1" set anc "$2"',
-      "sh", String(status.addr || ""), mode]
-    actionProc.running = true
+    enqueue(["anc", mode])
+    enqueue("status")
   }
 
   function cycleAnc(delta) {
@@ -184,13 +202,14 @@ Panel {
     id: statusProc
     command: ["sh", root.scriptPath]
     stdout: StdioCollector { waitForEnd: true; onStreamFinished: root.applyStatus(text) }
+    onExited: root.opDone()
   }
 
   Process {
     id: actionProc
     onExited: function(code) {
       if (code !== 0) root.pendingAnc = ""
-      root.refresh()
+      root.opDone()
     }
   }
 
@@ -198,16 +217,12 @@ Panel {
     id: controlsProc
     command: ["sh", root.scriptPath, "--controls"]
     stdout: StdioCollector { waitForEnd: true; onStreamFinished: root.applyControls(text) }
+    onExited: root.opDone()
   }
 
-  // Whatever a set did (or failed to do), re-read the truth from the buds —
-  // unless another set is already waiting, in which case it goes first.
   Process {
     id: ctlProc
-    onExited: {
-      if (root.pendingCtl !== null) { root.dispatchPending(); return }
-      root.refreshControls()
-    }
+    onExited: root.opDone()
   }
 
   // Connect/disconnect is event-driven: a plain signal subscription on the
@@ -749,8 +764,6 @@ Panel {
       verticalPadding: Style.spacing.controlPaddingY
       bordered: true
       active: trow.on
-      enabled: !ctlProc.running
-      opacity: enabled ? 1.0 : 0.5
       onClicked: root.setControl(trow.ctlKey, trow.on ? "false" : "true")
     }
   }
@@ -831,7 +844,6 @@ Panel {
       MouseArea {
         anchors.fill: parent
         anchors.margins: -Style.space(6)
-        enabled: !ctlProc.running
         onPressed: function(mouse) { srow.dragging = true; srow.dragVal = srow.valueAt(mouse.x + Style.space(6)) }
         onPositionChanged: function(mouse) { if (srow.dragging) srow.dragVal = srow.valueAt(mouse.x + Style.space(6)) }
         onReleased: {

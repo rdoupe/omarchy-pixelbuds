@@ -3,6 +3,7 @@
 # first; pbpctrl (RFCOMM to the buds) only runs when a pair is actually
 # connected, so a run triggered by some other device's connect event costs
 # one bluetoothctl call and nothing else.
+
 dev=$(bluetoothctl devices Connected 2>/dev/null | grep -i 'pixel buds' | head -n1)
 if [ -z "$dev" ]; then
   echo "connected=0"
