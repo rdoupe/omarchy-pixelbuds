@@ -50,13 +50,22 @@ Panel {
   readonly property color fg: bar ? bar.foreground : Color.foreground
   readonly property string fontFamily: bar ? bar.fontFamily : Style.font.family
 
+  // Only one pbpctrl process may talk to the buds at a time — concurrent
+  // RFCOMM sessions make each other's reads fail — so everything below
+  // funnels through this gate, and a controls request made while status is
+  // being read runs right after it instead.
+  property bool controlsQueued: false
+  readonly property bool busy: statusProc.running || controlsProc.running
+      || actionProc.running || ctlProc.running
+
   function refresh() {
-    if (statusProc.running) return
+    if (busy) return
     statusProc.running = true
   }
 
   function refreshControls() {
     if (!connected || missingPbpctrl || controlsProc.running) return
+    if (busy) { controlsQueued = true; return }
     controlsProc.running = true
   }
 
@@ -92,6 +101,7 @@ Panel {
     // confirm it, so the buttons don't flash back to the old state.
     if (pendingAnc !== "" && String(next.anc || "") === pendingAnc) pendingAnc = ""
     if (opened && !cursorActive) ancIndex = Model.ancIndex(root.anc)
+    if (controlsQueued) { controlsQueued = false; refreshControls() }
   }
 
   // The floating terminal is the one place sudo can prompt, so the install
