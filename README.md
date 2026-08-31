@@ -45,7 +45,7 @@ omarchy plugin add https://github.com/rdoupe/omarchy-pixelbuds.git --enable
 ## Remove
 
 ```bash
-omarchy plugin remove douper.pixelbuds
+omarchy plugin remove io.github.rdoupe.pixelbuds
 ```
 
 The only file written outside the plugin directory is the cached case-battery
@@ -64,13 +64,13 @@ Configure via the bar widget settings or directly in
 
 ## IPC
 
-The widget exposes the IPC target `douper.pixelbuds` with methods `open`,
+The widget exposes the IPC target `io.github.rdoupe.pixelbuds` with methods `open`,
 `close`, `toggle`, `refresh`, `cycleAnc`, and `setAnc(mode)` where mode is one
 of `off`, `active`, `aware`, `adaptive`:
 
 ```bash
-omarchy-shell douper.pixelbuds cycleAnc
-omarchy-shell douper.pixelbuds setAnc aware
+omarchy-shell io.github.rdoupe.pixelbuds cycleAnc
+omarchy-shell io.github.rdoupe.pixelbuds setAnc aware
 ```
 
 Handy for keybindings.

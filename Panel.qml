@@ -11,8 +11,8 @@ import "Model.js" as Model
 // Hidden entirely while no Pixel Buds are connected.
 Panel {
   id: root
-  moduleName: "douper.pixelbuds"
-  ipcTarget: "douper.pixelbuds"
+  moduleName: "io.github.rdoupe.pixelbuds"
+  ipcTarget: "io.github.rdoupe.pixelbuds"
   manageIpc: false
 
   property var status: ({})
@@ -27,7 +27,12 @@ Panel {
   readonly property int pollInterval: Math.max(5, parseInt(setting("pollIntervalSec", 30)) || 30) * 1000
   readonly property bool hideWhenDisconnected: String(setting("hideWhenDisconnected", true)) === "true"
   readonly property color urgentColor: bar ? bar.urgent : Color.urgent
-  readonly property var eqBands: controls.ctl_eq !== undefined ? String(controls.ctl_eq).split(",").map(Number) : []
+  // Device-supplied; only trusted as five finite numbers, else no EQ rows.
+  readonly property var eqBands: {
+    if (controls.ctl_eq === undefined) return []
+    var b = String(controls.ctl_eq).split(",").map(Number)
+    return b.length === 5 && b.every(function(x) { return isFinite(x) }) ? b : []
+  }
 
   readonly property bool connected: String(status.connected || "0") === "1"
   readonly property bool missingPbpctrl: String(status.missing_pbpctrl || "0") === "1"
@@ -185,7 +190,7 @@ Panel {
   }
 
   IpcHandler {
-    target: "douper.pixelbuds"
+    target: "io.github.rdoupe.pixelbuds"
 
     function open() { root.open() }
     function close() { root.close() }
@@ -646,7 +651,7 @@ Panel {
             label: "Balance"
             visible: root.controls.ctl_balance !== undefined
             from: -100; to: 100; step: 5
-            value: parseInt(root.controls.ctl_balance) || 0
+            value: Math.max(-100, Math.min(100, parseInt(root.controls.ctl_balance) || 0))
             format: function(v) { return v === 0 ? "center" : (v < 0 ? "L " + (-v) : "R " + v) }
             onCommitted: function(v) { root.setControl("balance", String(v)) }
           }
