@@ -33,6 +33,16 @@ thing.
 omarchy plugin add https://github.com/rdoupe/omarchy-pixelbuds.git --enable
 ```
 
+## Remove
+
+```bash
+omarchy plugin remove douper.pixelbuds
+```
+
+The only file written outside the plugin directory is the cached case-battery
+reading at `${XDG_STATE_HOME:-~/.local/state}/omarchy-pixelbuds-case`, which
+you can delete freely.
+
 ## Settings
 
 | Setting | Default | Meaning |
