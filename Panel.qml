@@ -74,15 +74,33 @@ Panel {
     var out = {}
     for (var k in next) if (k.indexOf("ctl_") === 0) out[k] = next[k]
     controls = out
+    dispatchPending()
   }
 
   // addr is a bluetoothctl MAC, key a literal subcommand, args numbers/bools —
-  // nothing here is user text, so plain string assembly is safe.
+  // nothing here is user text, so plain string assembly is safe. The "--"
+  // keeps negative values (balance, EQ) from parsing as flags. A set that
+  // arrives while the RFCOMM link is busy waits its turn instead of failing;
+  // last write wins.
+  property var pendingCtl: null
+
   function setControl(key, args) {
-    if (!connected || missingPbpctrl || ctlProc.running) return
+    if (!connected || missingPbpctrl) return
+    if (busy) { pendingCtl = [key, args]; return }
+    runCtl(key, args)
+  }
+
+  function runCtl(key, args) {
     ctlProc.command = ["sh", "-c",
-      "exec timeout 6 pbpctrl -d " + String(status.addr || "") + " set " + key + " " + args]
+      "exec timeout 6 pbpctrl -d " + String(status.addr || "") + " set " + key + " -- " + args]
     ctlProc.running = true
+  }
+
+  function dispatchPending() {
+    if (pendingCtl === null || busy) return
+    var p = pendingCtl
+    pendingCtl = null
+    runCtl(p[0], p[1])
   }
 
   function setEqBand(i, v) {
@@ -101,6 +119,7 @@ Panel {
     // confirm it, so the buttons don't flash back to the old state.
     if (pendingAnc !== "" && String(next.anc || "") === pendingAnc) pendingAnc = ""
     if (opened && !cursorActive) ancIndex = Model.ancIndex(root.anc)
+    if (pendingCtl !== null) { dispatchPending(); return }
     if (controlsQueued) { controlsQueued = false; refreshControls() }
   }
 
@@ -181,10 +200,14 @@ Panel {
     stdout: StdioCollector { waitForEnd: true; onStreamFinished: root.applyControls(text) }
   }
 
-  // Whatever a set did (or failed to do), re-read the truth from the buds.
+  // Whatever a set did (or failed to do), re-read the truth from the buds —
+  // unless another set is already waiting, in which case it goes first.
   Process {
     id: ctlProc
-    onExited: root.refreshControls()
+    onExited: {
+      if (root.pendingCtl !== null) { root.dispatchPending(); return }
+      root.refreshControls()
+    }
   }
 
   // Connect/disconnect is event-driven: a plain signal subscription on the
@@ -746,7 +769,16 @@ Panel {
 
     property bool dragging: false
     property real dragVal: 0
-    readonly property real shownVal: dragging ? dragVal : value
+    // Between release and the device answering, keep showing what was asked
+    // for; the next controls refresh replaces it with the device's truth.
+    property bool holding: false
+    property real holdVal: 0
+    readonly property real shownVal: dragging ? dragVal : (holding ? holdVal : value)
+
+    Connections {
+      target: root
+      function onControlsChanged() { srow.holding = false }
+    }
 
     width: parent.width
     implicitHeight: sliderLabel.implicitHeight + strack.height + Style.space(6)
@@ -805,7 +837,11 @@ Panel {
         onReleased: {
           if (!srow.dragging) return
           srow.dragging = false
-          if (srow.dragVal !== srow.value) srow.committed(srow.dragVal)
+          if (srow.dragVal !== srow.value) {
+            srow.holding = true
+            srow.holdVal = srow.dragVal
+            srow.committed(srow.dragVal)
+          }
         }
       }
     }
