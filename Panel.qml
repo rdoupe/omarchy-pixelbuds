@@ -210,14 +210,14 @@ Panel {
         onPaint: {
           var ctx = getContext("2d")
           ctx.reset()
-          // Real case: 2 3/4" tall by 1 7/8" wide, hinge seam 3/4" from the
+          // Real case: 2 1/2" tall by 1 7/8" wide, hinge seam 3/4" from the
           // top, flaring out for about another 1/4" below it before the sides
           // go flat. The same curve caps the top and bottom (superellipse
           // quadrants, n = 2.5, each reaching 1" in from its end); only the
-          // middle 3/4" is straight side.
+          // middle 1/2" is straight side.
           var ch = height * 0.82
-          var cw = ch * (1.875 / 2.75)
-          var capH = ch * (1.0 / 2.75)
+          var cw = ch * (1.875 / 2.5)
+          var capH = ch * (1.0 / 2.5)
           var cx = width / 2
           var top = (height - ch) / 2
           var a = cw / 2
@@ -244,7 +244,7 @@ Panel {
           ctx.closePath()                     // right flat side
           ctx.fill()
           var seam = Math.max(1.1, height * 0.06)
-          ctx.clearRect(0, top + ch * (0.75 / 2.75) - seam / 2, width, seam)
+          ctx.clearRect(0, top + ch * (0.75 / 2.5) - seam / 2, width, seam)
         }
       }
     }
