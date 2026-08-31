@@ -3,15 +3,6 @@
 # first; pbpctrl (RFCOMM to the buds) only runs when a pair is actually
 # connected, so a run triggered by some other device's connect event costs
 # one bluetoothctl call and nothing else.
-PATH="$HOME/.local/bin:$HOME/.cargo/bin:$PATH"
-export PATH
-
-if ! command -v pbpctrl >/dev/null 2>&1; then
-  echo "connected=0"
-  echo "error=pbpctrl not installed"
-  exit 0
-fi
-
 dev=$(bluetoothctl devices Connected 2>/dev/null | grep -i 'pixel buds' | head -n1)
 if [ -z "$dev" ]; then
   echo "connected=0"
@@ -23,6 +14,14 @@ name=$(printf '%s' "$dev" | cut -d' ' -f3-)
 echo "connected=1"
 echo "addr=$addr"
 echo "name=$name"
+
+# Buds are connected: surface a missing pbpctrl instead of hiding the widget,
+# so a fresh install isn't just silently invisible.
+if ! command -v pbpctrl >/dev/null 2>&1; then
+  echo "missing_pbpctrl=1"
+  echo "error=pbpctrl is not installed"
+  exit 0
+fi
 
 rt=$(timeout 6 pbpctrl -d "$addr" show runtime 2>/dev/null) || {
   echo "error=pbpctrl show runtime failed"

@@ -25,6 +25,7 @@ Panel {
   readonly property int pollInterval: Math.max(5, parseInt(setting("pollIntervalSec", 30)) || 30) * 1000
 
   readonly property bool connected: String(status.connected || "0") === "1"
+  readonly property bool missingPbpctrl: String(status.missing_pbpctrl || "0") === "1"
   readonly property string budsName: String(status.name || "Pixel Buds")
   readonly property string anc: pendingAnc !== "" ? pendingAnc : String(status.anc || "unknown")
   readonly property int leftPct: Model.pct(status, "left")
@@ -60,12 +61,19 @@ Panel {
     if (opened && !cursorActive) ancIndex = Model.ancIndex(root.anc)
   }
 
+  // The floating terminal is the one place sudo can prompt, so the install
+  // goes through the stock presentation wrapper like the menu's installers.
+  function installPbpctrl() {
+    if (bar) bar.run("omarchy-launch-floating-terminal-with-presentation omarchy-pkg-aur-add pbpctrl")
+    close()
+  }
+
   function setAnc(mode) {
-    if (!connected || actionProc.running) return
+    if (!connected || missingPbpctrl || actionProc.running) return
     if (Model.ANC_MODES.indexOf(mode) < 0) return
     pendingAnc = mode
     actionProc.command = ["sh", "-c",
-      'PATH="$HOME/.local/bin:$HOME/.cargo/bin:$PATH"; exec timeout 6 pbpctrl -d "$1" set anc "$2"',
+      'exec timeout 6 pbpctrl -d "$1" set anc "$2"',
       "sh", String(status.addr || ""), mode]
     actionProc.running = true
   }
@@ -84,6 +92,7 @@ Panel {
 
   function tooltip() {
     if (!connected) return ""
+    if (missingPbpctrl) return budsName + " — pbpctrl is not installed"
     var parts = []
     if (leftPct >= 0) parts.push("L " + leftPct + "%")
     if (rightPct >= 0) parts.push("R " + rightPct + "%")
@@ -184,7 +193,7 @@ Panel {
     anchors.fill: parent
     bar: root.bar
     iconComponent: caseIcon
-    active: false
+    active: root.missingPbpctrl
     tooltipText: root.tooltip()
     onPressed: function(b) {
       if (!root.connected) return
@@ -316,8 +325,10 @@ Panel {
             }
 
             Text {
-              text: (root.pendingAnc !== "" ? "Switching to " + Model.ancLabel(root.anc) : Model.ancLabel(root.anc)).toUpperCase()
-              color: Qt.darker(root.fg, 1.4)
+              text: (root.missingPbpctrl ? "pbpctrl is not installed"
+                  : root.pendingAnc !== "" ? "Switching to " + Model.ancLabel(root.anc)
+                  : Model.ancLabel(root.anc)).toUpperCase()
+              color: root.missingPbpctrl ? (root.bar ? root.bar.urgent : Color.urgent) : Qt.darker(root.fg, 1.4)
               font.family: root.fontFamily
               font.pixelSize: Style.font.caption
               font.bold: true
@@ -339,8 +350,37 @@ Panel {
           }
         }
 
+        // ---------- Missing dependency ----------
+        Column {
+          visible: root.missingPbpctrl
+          width: parent.width
+          spacing: Style.space(10)
+
+          Text {
+            width: parent.width
+            wrapMode: Text.WordWrap
+            text: "Battery levels and listening-mode control come from the pbpctrl CLI, which is packaged in the AUR."
+            color: Qt.darker(root.fg, 1.4)
+            font.family: root.fontFamily
+            font.pixelSize: Style.font.bodySmall
+          }
+
+          Button {
+            width: parent.width
+            text: "Install pbpctrl from the AUR"
+            fontSize: Style.font.bodySmall
+            foreground: root.fg
+            fontFamily: root.fontFamily
+            horizontalPadding: Style.spacing.controlPaddingX
+            verticalPadding: Style.spacing.controlPaddingY + Style.space(2)
+            bordered: true
+            onClicked: root.installPbpctrl()
+          }
+        }
+
         // ---------- Batteries ----------
         Column {
+          visible: !root.missingPbpctrl
           width: parent.width
           spacing: Style.space(8)
 
@@ -367,9 +407,10 @@ Panel {
         }
 
         // ---------- Listening mode ----------
-        PanelSeparator { foreground: root.fg }
+        PanelSeparator { visible: !root.missingPbpctrl; foreground: root.fg }
 
         Column {
+          visible: !root.missingPbpctrl
           width: parent.width
           spacing: Style.space(10)
 
@@ -413,7 +454,7 @@ Panel {
         }
 
         Text {
-          visible: !!root.status.error
+          visible: !!root.status.error && !root.missingPbpctrl
           width: parent.width
           wrapMode: Text.WordWrap
           text: String(root.status.error || "")
