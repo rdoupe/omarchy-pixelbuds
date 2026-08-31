@@ -210,33 +210,41 @@ Panel {
         onPaint: {
           var ctx = getContext("2d")
           ctx.reset()
-          // Proportions measured from a photo of the real case: upright,
-          // 0.81 w:h, seam 32% from the top, shoulders fuller than an
-          // ellipse — a superellipse with exponent 2.5.
+          // Real case: 2 3/4" tall by 1 7/8" wide, hinge seam 3/4" from the
+          // top, flaring out for about another 1/4" below it before the sides
+          // go flat. The same curve caps the top and bottom (superellipse
+          // quadrants, n = 2.5, each reaching 1" in from its end); only the
+          // middle 3/4" is straight side.
           var ch = height * 0.82
-          var cw = ch * 0.81
+          var cw = ch * (1.875 / 2.75)
+          var capH = ch * (1.0 / 2.75)
           var cx = width / 2
-          var cy = height / 2
-          // The body ran a touch tall below the seam: take one pixel off the
-          // bottom only, leaving the lid and seam where they are.
-          ch -= 1
-          cy -= 0.5
+          var top = (height - ch) / 2
           var a = cw / 2
-          var b = ch / 2
           var n = 2.5
+          var yTop = top + capH
+          var yBot = top + ch - capH
           ctx.fillStyle = icon.tint
           ctx.beginPath()
-          for (var i = 0; i <= 64; i++) {
-            var t = i / 64 * 2 * Math.PI
+          var STEPS = 24
+          for (var i = 0; i <= STEPS; i++) {  // top cap, right edge to left
+            var t = Math.PI * i / STEPS
             var c = Math.cos(t), s = Math.sin(t)
             var px = cx + a * Math.sign(c) * Math.pow(Math.abs(c), 2 / n)
-            var py = cy + b * Math.sign(s) * Math.pow(Math.abs(s), 2 / n)
+            var py = yTop - capH * Math.pow(Math.abs(s), 2 / n)
             if (i === 0) ctx.moveTo(px, py); else ctx.lineTo(px, py)
           }
-          ctx.closePath()
+          ctx.lineTo(cx - a, yBot)            // left flat side
+          for (var j = 0; j <= STEPS; j++) {  // bottom cap, left edge to right
+            var u = Math.PI * j / STEPS
+            var cu = Math.cos(u), su = Math.sin(u)
+            ctx.lineTo(cx - a * Math.sign(cu) * Math.pow(Math.abs(cu), 2 / n),
+                       yBot + capH * Math.pow(Math.abs(su), 2 / n))
+          }
+          ctx.closePath()                     // right flat side
           ctx.fill()
           var seam = Math.max(1.1, height * 0.06)
-          ctx.clearRect(0, cy - b + ch * 0.32 - seam / 2, width, seam)
+          ctx.clearRect(0, top + ch * (0.75 / 2.75) - seam / 2, width, seam)
         }
       }
     }
