@@ -219,11 +219,14 @@ Panel {
           var cw = ch * (1.875 / 2.5)
           var capH = ch * (1.0 / 2.5)
           var cx = width / 2
-          var top = (height - ch) / 2
+          // The measured shape still reads a touch tall at bar size: take one
+          // pixel row out of the flat section below the hinge.
+          var trim = 1
+          var top = (height - ch + trim) / 2
           var a = cw / 2
           var n = 2.5
           var yTop = top + capH
-          var yBot = top + ch - capH
+          var yBot = top + ch - capH - trim
           ctx.fillStyle = icon.tint
           ctx.beginPath()
           var STEPS = 24
