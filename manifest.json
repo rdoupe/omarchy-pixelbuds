@@ -2,10 +2,10 @@
   "schemaVersion": 1,
   "id": "io.github.rdoupe.pixelbuds",
   "name": "Pixel Buds",
-  "version": "1.3.2",
+  "version": "1.4.0",
   "author": "Ryan Doupé",
   "license": "MIT",
-  "description": "Pixel Buds Pro in the bar: per-bud and case battery, charging/in-case state, and listening mode (ANC) switching via pbpctrl.",
+  "description": "Pixel Buds Pro in the bar: per-bud and case battery, listening modes (ANC), and device and sound controls — multipoint, speech detection, on-head detection, volume alerts, EQ, balance — via pbpctrl. Event-driven: the icon appears the moment your buds connect. Requires the pbpctrl AUR package; the popup walks you through installing it.",
   "kinds": [
     "bar-widget"
   ],
@@ -14,7 +14,7 @@
   },
   "barWidget": {
     "displayName": "Pixel Buds",
-    "description": "Battery per bud and case, plus Off / Noise Cancelling / Transparency / Adaptive switching.",
+    "description": "Battery per bud and case, listening modes, and an Advanced section with device toggles, EQ, balance and mono. Needs pbpctrl (AUR).",
     "category": "System",
     "allowMultiple": false,
     "defaultSection": "right",

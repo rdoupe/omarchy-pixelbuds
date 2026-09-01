@@ -221,6 +221,7 @@ Panel {
     function show() { root.open() }
     function hide() { root.close() }
     function toggle() { root.toggle() }
+    function showAdvanced() { root.open(); root.advancedOpen = true }
     function refresh() { root.refresh() }
     function cycleAnc() { root.cycleAnc(1) }
     function setAnc(mode: string) { root.setAnc(mode) }

@@ -67,7 +67,7 @@ Configure via the bar widget settings or directly in
 ## IPC
 
 The widget exposes the IPC target `io.github.rdoupe.pixelbuds` with methods `open`,
-`close`, `toggle`, `refresh`, `cycleAnc`, and `setAnc(mode)` where mode is one
+`close`, `toggle`, `showAdvanced`, `refresh`, `cycleAnc`, and `setAnc(mode)` where mode is one
 of `off`, `active`, `aware`, `adaptive`:
 
 ```bash
