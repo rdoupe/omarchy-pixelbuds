@@ -82,29 +82,53 @@ Panel {
     pump()
   }
 
+  // Every launched process is stamped with the generation it belongs to; an
+  // abort bumps the generation, so exits (and output) from killed processes
+  // can neither release the gate under a newer op nor feed stale data in.
+  property int opGen: 0
+  readonly property bool addrValid: /^([0-9A-F]{2}:){5}[0-9A-F]{2}$/i.test(String(status.addr || ""))
+
   function pump() {
     if (opRunning || opQueue.length === 0) return
     var op = opQueue.shift()
+    if (op === "controls" && (!connected || missingPbpctrl)) { Qt.callLater(root.pump); return }
+    if (op !== "status" && op !== "controls" && !addrValid) { Qt.callLater(root.pump); return }
     opRunning = true
+    var addr = String(status.addr || "")
     if (op === "status") {
+      statusProc.gen = opGen
       statusProc.running = true
     } else if (op === "controls") {
-      if (!connected || missingPbpctrl) { opDone(); return }
+      controlsProc.gen = opGen
       controlsProc.running = true
     } else if (op[0] === "set") {
-      ctlProc.command = ["timeout", "6", "pbpctrl", "-d", String(status.addr || ""),
+      ctlProc.gen = opGen
+      ctlProc.command = ["timeout", "6", "pbpctrl", "-d", addr,
         "set", op[1], "--"].concat(String(op[2]).split(" "))
       ctlProc.running = true
     } else {
-      actionProc.command = ["timeout", "6", "pbpctrl", "-d", String(status.addr || ""),
-        "set", "anc", op[1]]
+      actionProc.gen = opGen
+      actionProc.command = ["timeout", "6", "pbpctrl", "-d", addr, "set", "anc", op[1]]
       actionProc.running = true
     }
   }
 
-  function opDone() {
+  function opDone(gen) {
+    if (gen !== opGen) return
     opRunning = false
     Qt.callLater(root.pump)
+  }
+
+  // User disconnect: kill whatever is talking to the buds right now (the
+  // script's TERM trap takes its pbpctrl child down with it), forget the
+  // queue, and reset the gate — nothing of ours may hold the link open.
+  function abortOps() {
+    opGen++
+    var procs = [statusProc, controlsProc, actionProc, ctlProc]
+    for (var i = 0; i < procs.length; i++) if (procs[i].running) procs[i].running = false
+    opQueue = []
+    opRunning = false
+    pendingAnc = ""
   }
 
   function refresh() { enqueue("status") }
@@ -204,29 +228,39 @@ Panel {
 
   Process {
     id: statusProc
+    property int gen: 0
     command: ["sh", root.scriptPath]
-    stdout: StdioCollector { waitForEnd: true; onStreamFinished: root.applyStatus(text) }
-    onExited: root.opDone()
+    stdout: StdioCollector {
+      waitForEnd: true
+      onStreamFinished: if (statusProc.gen === root.opGen) root.applyStatus(text)
+    }
+    onExited: root.opDone(statusProc.gen)
   }
 
   Process {
     id: actionProc
+    property int gen: 0
     onExited: function(code) {
       if (code !== 0) root.pendingAnc = ""
-      root.opDone()
+      root.opDone(actionProc.gen)
     }
   }
 
   Process {
     id: controlsProc
+    property int gen: 0
     command: ["sh", root.scriptPath, "--controls"]
-    stdout: StdioCollector { waitForEnd: true; onStreamFinished: root.applyControls(text) }
-    onExited: root.opDone()
+    stdout: StdioCollector {
+      waitForEnd: true
+      onStreamFinished: if (controlsProc.gen === root.opGen) root.applyControls(text)
+    }
+    onExited: root.opDone(controlsProc.gen)
   }
 
   Process {
     id: ctlProc
-    onExited: root.opDone()
+    property int gen: 0
+    onExited: root.opDone(ctlProc.gen)
   }
 
   // Connect/disconnect is event-driven: a plain signal subscription on the
@@ -239,11 +273,13 @@ Panel {
     running: true
     stdout: SplitParser {
       onRead: function(line) {
+        if (line.length > 4096) return
         if (line.indexOf("'Connected': <false>") >= 0) {
-          // A disconnect. Drop everything queued so no pbpctrl call opens a
-          // fresh RFCOMM session and yanks the buds right back; one cheap
-          // status pass (bluetoothctl only) updates the UI.
-          root.opQueue = []
+          // A disconnect. Kill anything talking to the buds and drop the
+          // queue so no pbpctrl call holds or reopens the RFCOMM session and
+          // yanks the buds back; one cheap status pass (bluetoothctl only)
+          // then updates the UI.
+          root.abortOps()
           rfcommFollowUp.stop()
           root.disconnectEvent = true
           eventDebounce.restart()

@@ -49,7 +49,7 @@ omarchy plugin remove io.github.rdoupe.pixelbuds
 ```
 
 The only file written outside the plugin directory is the cached case-battery
-reading at `${XDG_STATE_HOME:-~/.local/state}/omarchy-pixelbuds-case`, which
+reading at `${XDG_STATE_HOME:-~/.local/state}/omarchy-pixelbuds/case`, which
 you can delete freely.
 
 ## Settings
