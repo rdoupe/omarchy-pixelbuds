@@ -10,18 +10,23 @@
 
 tmpd=$(mktemp -d) || exit 0
 child=""
-cleanup() { [ -n "$child" ] && kill "$child" 2>/dev/null; rm -rf "$tmpd"; }
+cleanup() { [ -n "$child" ] && kill -TERM -- "-$child" 2>/dev/null; rm -rf "$tmpd"; }
 trap 'cleanup; exit 143' TERM INT HUP
 trap cleanup EXIT
 
-# cap <maxbytes> <cmd...>: run cmd as a killable child, keep at most maxbytes
-# of its stdout in $out, return its exit status.
+# cap <maxbytes> <cmd...>: run cmd in its own session with its stdout bounded
+# AT THE SOURCE — head closes the pipe at the ceiling, so the producer can
+# never write more than that anywhere (it dies on SIGPIPE), and only the
+# bounded bytes ever touch disk. The whole session is killable with one
+# group signal; timeout --foreground keeps timeout inside that group and
+# forwarding to pbpctrl. Empty output counts as failure.
 cap() {
   max=$1; shift
-  "$@" >"$tmpd/o" 2>/dev/null & child=$!
-  wait "$child"; rc=$?; child=""
-  out=$(head -c "$max" "$tmpd/o")
-  return $rc
+  MAX="$max" setsid sh -c '"$@" 2>/dev/null | head -c "$MAX"' sh "$@" >"$tmpd/o" &
+  child=$!
+  wait "$child"; child=""
+  out=$(cat "$tmpd/o")
+  [ -n "$out" ]
 }
 
 # line1 <text> <maxchars>: first line, truncated.
@@ -29,7 +34,7 @@ line1() { printf '%s\n' "$1" | head -n1 | cut -c1-"$2"; }
 
 is_num() { printf '%s' "$1" | grep -Eq '^[0-9]{1,3}$' && [ "$1" -le 100 ]; }
 
-cap 8192 timeout 5 bluetoothctl devices Connected || out=""
+cap 8192 timeout --foreground 5 bluetoothctl devices Connected || out=""
 dev=$(printf '%s\n' "$out" | grep -i 'pixel buds' | head -n1 | cut -c1-200)
 if [ -z "$dev" ]; then
   echo "connected=0"
@@ -60,12 +65,12 @@ fi
 # talking, and treat a failure followed by a gone link as a plain disconnect
 # (a later connected=0 overrides the connected=1 printed above).
 is_conn() {
-  cap 8192 timeout 5 bluetoothctl info "$addr" && printf '%s\n' "$out" | grep -q 'Connected: yes'
+  cap 8192 timeout --foreground 5 bluetoothctl info "$addr" && printf '%s\n' "$out" | grep -q 'Connected: yes'
 }
 
 is_conn || { echo "connected=0"; exit 0; }
 
-if ! cap 8192 timeout 6 pbpctrl -d "$addr" show runtime; then
+if ! cap 8192 timeout --foreground 6 pbpctrl -d "$addr" show runtime; then
   if is_conn; then echo "error=pbpctrl show runtime failed"; else echo "connected=0"; fi
   exit 0
 fi
@@ -100,32 +105,26 @@ printf '%s\n' "$parsed"
 
 # The case only reports through a docked bud (it has no radio of its own), so
 # mirror Android: remember the last reading and surface it while it is stale.
-# The cache lives in a private 0700 directory of our own, is written through a
-# 0600 temp file plus atomic rename onto a verified non-symlink regular file,
-# and is only read back when it is a small regular file holding two sane
-# numbers.
-sdir="${XDG_STATE_HOME:-$HOME/.local/state}/omarchy-pixelbuds"
-cache="$sdir/case"
-now=$(date +%s)
+# The cache is handled by casecache.py, which works through a held directory
+# descriptor with O_NOFOLLOW and fstat-on-descriptor checks — no pathname is
+# ever checked and then used. Without python3 the feature is simply skipped.
+here=$(dirname "$0")
 case_now=$(printf '%s\n' "$parsed" | sed -n 's/^case=//p' | head -n1)
-if is_num "$case_now"; then
-  if { [ -d "$sdir" ] || mkdir -m 0700 "$sdir" 2>/dev/null; } && [ ! -L "$sdir" ] \
-     && [ ! -L "$cache" ] && { [ ! -e "$cache" ] || [ -f "$cache" ]; }; then
-    chmod 0700 "$sdir" 2>/dev/null
-    if tmp=$(mktemp "$sdir/.case.XXXXXX" 2>/dev/null); then
-      printf '%s|%s\n' "$case_now" "$now" > "$tmp" && mv -f "$tmp" "$cache" || rm -f "$tmp"
+if command -v python3 >/dev/null 2>&1; then
+  if is_num "$case_now"; then
+    python3 "$here/casecache.py" put "$case_now" 2>/dev/null
+  elif cap 64 python3 "$here/casecache.py" get; then
+    last_pct=${out%% *}; last_ts=${out#* }; last_ts=${last_ts%%[!0-9]*}
+    now=$(date +%s)
+    if is_num "$last_pct" && printf '%s' "$last_ts" | grep -Eq '^[0-9]{1,12}$' \
+       && [ "$last_ts" -le "$now" ]; then
+      echo "case_last=$last_pct"
+      echo "case_last_age=$((now - last_ts))"
     fi
-  fi
-elif [ ! -L "$cache" ] && [ -f "$cache" ] && [ "$(wc -c < "$cache")" -le 64 ]; then
-  IFS='|' read -r last_pct last_ts < "$cache"
-  if is_num "$last_pct" && printf '%s' "$last_ts" | grep -Eq '^[0-9]{1,12}$' \
-     && [ "$last_ts" -le "$now" ]; then
-    echo "case_last=$last_pct"
-    echo "case_last_age=$((now - last_ts))"
   fi
 fi
 
-cap 256 timeout 6 pbpctrl -d "$addr" get anc || out=""
+cap 256 timeout --foreground 6 pbpctrl -d "$addr" get anc || out=""
 anc=$(line1 "$out" 16)
 case "$anc" in off|active|aware|adaptive) ;; *) anc=unknown ;; esac
 echo "anc=$anc"
@@ -139,7 +138,7 @@ echo "anc=$anc"
 is_conn || exit 0
 
 for k in multipoint ohd speech-detection volume-exposure-notifications volume-eq mono; do
-  cap 256 timeout 6 pbpctrl -d "$addr" get "$k" || out=""
+  cap 256 timeout --foreground 6 pbpctrl -d "$addr" get "$k" || out=""
   v=$(line1 "$out" 8)
   case "$v" in
     true|false) echo "ctl_$(printf '%s' "$k" | tr - _)=$v" ;;
@@ -147,7 +146,7 @@ for k in multipoint ohd speech-detection volume-exposure-notifications volume-eq
 done
 
 # "left: 100%, right: 80%" -> -100..100 (negative = toward the left)
-cap 256 timeout 6 pbpctrl -d "$addr" get balance || out=""
+cap 256 timeout --foreground 6 pbpctrl -d "$addr" get balance || out=""
 bal=$(line1 "$out" 64)
 case "$bal" in
   left:*)
@@ -160,7 +159,7 @@ case "$bal" in
 esac
 
 # "[0.00, 1.50, ...]" -> comma-joined five bands, each a plain decimal
-cap 256 timeout 6 pbpctrl -d "$addr" get eq || out=""
+cap 256 timeout --foreground 6 pbpctrl -d "$addr" get eq || out=""
 eqv=$(line1 "$out" 96)
 case "$eqv" in
   \[*\])

@@ -34,6 +34,8 @@ thing.
   — paste it into a terminal to install. The plugin itself never installs
   software and never elevates privileges.
 - BlueZ (`bluetoothctl`) and glib2 (`gdbus`) — both ship with Omarchy.
+- `python3` (ships with Omarchy) for the small race-free case-battery cache
+  helper; without it that one feature is simply skipped.
 - Pixel Buds supported by `pbpctrl` (Pixel Buds Pro generation).
 
 ## Install
