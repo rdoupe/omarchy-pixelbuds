@@ -3,7 +3,7 @@
   "id": "io.github.rdoupe.pixelbuds",
   "name": "Pixel Buds",
   "version": "1.4.0",
-  "author": "Ryan Doupé",
+  "author": "Ryan Doupe",
   "license": "MIT",
   "description": "Pixel Buds Pro in the bar: per-bud and case battery, listening modes (ANC), and device and sound controls — multipoint, speech detection, on-head detection, volume alerts, EQ, balance — via pbpctrl. Event-driven: the icon appears the moment your buds connect. Requires the pbpctrl AUR package; the popup walks you through installing it.",
   "kinds": [
