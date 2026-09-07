@@ -24,6 +24,7 @@ Panel {
   property string pendingAnc: ""
 
   readonly property string scriptPath: String(Qt.resolvedUrl("status.sh")).replace(/^file:\/\//, "")
+  readonly property string pbpctrlPath: String(Qt.resolvedUrl("pbpctrl-locked.sh")).replace(/^file:\/\//, "")
   readonly property int pollInterval: Math.max(5, parseInt(setting("pollIntervalSec", 30)) || 30) * 1000
   readonly property bool hideWhenDisconnected: String(setting("hideWhenDisconnected", true)) === "true"
   readonly property color urgentColor: bar ? bar.urgent : Color.urgent
@@ -103,12 +104,12 @@ Panel {
       controlsProc.running = true
     } else if (op[0] === "set") {
       ctlProc.gen = opGen
-      ctlProc.command = ["timeout", "6", "pbpctrl", "-d", addr,
+      ctlProc.command = ["timeout", "15", root.pbpctrlPath, "-d", addr,
         "set", op[1], "--"].concat(String(op[2]).split(" "))
       ctlProc.running = true
     } else {
       actionProc.gen = opGen
-      actionProc.command = ["timeout", "6", "pbpctrl", "-d", addr, "set", "anc", op[1]]
+      actionProc.command = ["timeout", "15", root.pbpctrlPath, "-d", addr, "set", "anc", op[1]]
       actionProc.running = true
     }
   }

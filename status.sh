@@ -10,6 +10,7 @@
 
 tmpd=$(mktemp -d) || exit 0
 child=""
+here=$(dirname "$0")
 cleanup() { [ -n "$child" ] && kill -TERM -- "-$child" 2>/dev/null; rm -rf "$tmpd"; }
 trap 'cleanup; exit 143' TERM INT HUP
 trap cleanup EXIT
@@ -70,7 +71,7 @@ is_conn() {
 
 is_conn || { echo "connected=0"; exit 0; }
 
-if ! cap 8192 timeout --foreground 6 pbpctrl -d "$addr" show runtime; then
+if ! cap 8192 timeout --foreground 15 "$here/pbpctrl-locked.sh" -d "$addr" show runtime; then
   if is_conn; then echo "error=pbpctrl show runtime failed"; else echo "connected=0"; fi
   exit 0
 fi
@@ -108,7 +109,6 @@ printf '%s\n' "$parsed"
 # The cache is handled by casecache.py, which works through a held directory
 # descriptor with O_NOFOLLOW and fstat-on-descriptor checks — no pathname is
 # ever checked and then used. Without python3 the feature is simply skipped.
-here=$(dirname "$0")
 case_now=$(printf '%s\n' "$parsed" | sed -n 's/^case=//p' | head -n1)
 if command -v python3 >/dev/null 2>&1; then
   if is_num "$case_now"; then
@@ -124,7 +124,7 @@ if command -v python3 >/dev/null 2>&1; then
   fi
 fi
 
-cap 256 timeout --foreground 6 pbpctrl -d "$addr" get anc || out=""
+cap 256 timeout --foreground 15 "$here/pbpctrl-locked.sh" -d "$addr" get anc || out=""
 anc=$(line1 "$out" 16)
 case "$anc" in off|active|aware|adaptive) ;; *) anc=unknown ;; esac
 echo "anc=$anc"
@@ -138,7 +138,7 @@ echo "anc=$anc"
 is_conn || exit 0
 
 for k in multipoint ohd speech-detection volume-exposure-notifications volume-eq mono; do
-  cap 256 timeout --foreground 6 pbpctrl -d "$addr" get "$k" || out=""
+  cap 256 timeout --foreground 15 "$here/pbpctrl-locked.sh" -d "$addr" get "$k" || out=""
   v=$(line1 "$out" 8)
   case "$v" in
     true|false) echo "ctl_$(printf '%s' "$k" | tr - _)=$v" ;;
@@ -146,7 +146,7 @@ for k in multipoint ohd speech-detection volume-exposure-notifications volume-eq
 done
 
 # "left: 100%, right: 80%" -> -100..100 (negative = toward the left)
-cap 256 timeout --foreground 6 pbpctrl -d "$addr" get balance || out=""
+cap 256 timeout --foreground 15 "$here/pbpctrl-locked.sh" -d "$addr" get balance || out=""
 bal=$(line1 "$out" 64)
 case "$bal" in
   left:*)
@@ -159,7 +159,7 @@ case "$bal" in
 esac
 
 # "[0.00, 1.50, ...]" -> comma-joined five bands, each a plain decimal
-cap 256 timeout --foreground 6 pbpctrl -d "$addr" get eq || out=""
+cap 256 timeout --foreground 15 "$here/pbpctrl-locked.sh" -d "$addr" get eq || out=""
 eqv=$(line1 "$out" 96)
 case "$eqv" in
   \[*\])
