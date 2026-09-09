@@ -5,7 +5,7 @@
   "version": "1.4.1",
   "author": "Ryan Doupe",
   "license": "MIT",
-  "description": "Pixel Buds Pro in the bar: per-bud and case battery, listening modes (ANC), and device and sound controls \u2014 multipoint, speech detection, on-head detection, volume alerts, EQ, balance \u2014 via pbpctrl. Event-driven: the icon appears the moment your buds connect. Requires the pbpctrl AUR package; the popup walks you through installing it.",
+  "description": "Pixel Buds Pro in the Omarchy bar — battery per bud and case, ANC / Transparency / Adaptive, and device + sound controls (multipoint, speech detection, on-head, EQ, balance). Event-driven: the icon appears the moment your buds connect. Needs pbpctrl (AUR); the popup walks you through installing it if it’s missing. Optional: bind a hotkey to omarchy-shell io.github.rdoupe.pixelbuds cycleAnc / toggle.",
   "kinds": [
     "bar-widget"
   ],
