@@ -49,6 +49,7 @@ OUT
   "get volume-eq") echo false ;;
   "get mono") echo false ;;
   "get gestures") echo true ;;
+  "get diagnostics") echo false ;;
   "get gesture-control") echo "left: anc, right: assistant" ;;
   "get anc-gesture-loop")
     if [ "${PBPCTRL_TEST_ADAPTIVE:-0}" = 1 ]; then
@@ -80,6 +81,7 @@ assert_line "$legacy" "connected=1"
 assert_line "$legacy" "adaptive_supported=0"
 assert_line "$legacy" "anc=active"
 assert_line "$legacy" "ctl_gestures=true"
+assert_line "$legacy" "ctl_diagnostics=false"
 assert_line "$legacy" "ctl_gesture_left=anc"
 assert_line "$legacy" "ctl_gesture_right=assistant"
 assert_line "$legacy" "ctl_anc_gesture_loop=active,aware"

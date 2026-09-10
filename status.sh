@@ -146,7 +146,7 @@ echo "anc=$anc"
 # Same guard before the burst of control reads: never chase a leaving device.
 is_conn || exit 0
 
-for k in multipoint ohd speech-detection volume-exposure-notifications volume-eq mono gestures; do
+for k in multipoint ohd speech-detection volume-exposure-notifications volume-eq mono gestures diagnostics; do
   cap 256 timeout --foreground 15 "$here/pbpctrl-locked.sh" -d "$addr" get "$k" || out=""
   v=$(line1 "$out" 8)
   case "$v" in

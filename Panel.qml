@@ -802,6 +802,7 @@ Panel {
           ToggleRow { label: "Speech detection"; ctlKey: "speech-detection"; statusKey: "ctl_speech_detection" }
           ToggleRow { label: "On-head detection"; ctlKey: "ohd"; statusKey: "ctl_ohd" }
           ToggleRow { label: "Volume level alerts"; ctlKey: "volume-exposure-notifications"; statusKey: "ctl_volume_exposure_notifications" }
+          ToggleRow { label: "Share diagnostics with Google"; ctlKey: "diagnostics"; statusKey: "ctl_diagnostics" }
 
           PanelSectionHeader {
             visible: root.controls.ctl_gestures !== undefined
