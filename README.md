@@ -9,13 +9,19 @@ Pixel Buds battery and listening-mode control, right in the Omarchy bar.
 - **Per-bud and case battery** with charging and in-case state. The case only
   reports while a bud is docked (it has no radio of its own), so the last
   reading is cached and shown with a "last seen" age — same trick Android uses.
-- **Listening-mode panel**: Off / Noise Cancelling / Transparency / Adaptive,
-  clickable or keyboard-navigable.
+- **Listening-mode panel**: Off / Noise Cancelling / Transparency, plus
+  Adaptive when the installed `pbpctrl` supports it; clickable or
+  keyboard-navigable.
 - **Quick ANC cycling**: right- or middle-click the bar icon to cycle modes
-  without opening the panel.
+  without opening the panel, following the same mode loop configured on the
+  buds themselves.
+- **Shared volume and swipe OSD**: shows the buds' native Bluetooth absolute
+  volume and summons Omarchy's volume OSD when either bud changes it.
 - **Device toggles**: multipoint audio, speech detection (auto-transparency
   while you talk), on-head detection, and volume level alerts. Rows are
   capability-gated — a control only appears if your buds answer for it.
+- **Touch controls**: enable/disable gestures, choose ANC or Assistant for
+  each bud's hold action, and select the listening modes that hold cycles.
 - **Advanced sound**, tucked behind a collapsed section: volume-dependent EQ,
   mono audio, balance, and the 5-band EQ.
 - **Low battery** turns a battery row the urgent color at 20% or less.

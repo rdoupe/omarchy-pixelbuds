@@ -15,6 +15,7 @@ function parseStatus(raw) {
 }
 
 var ANC_MODES = ["off", "active", "aware", "adaptive"]
+var LEGACY_ANC_MODES = ["off", "active", "aware"]
 
 function ancLabel(mode) {
   switch (String(mode || "")) {

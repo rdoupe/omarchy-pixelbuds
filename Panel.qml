@@ -1,6 +1,7 @@
 import QtQuick
 import Quickshell
 import Quickshell.Io
+import Quickshell.Services.Pipewire
 import qs.Commons
 import qs.Ui
 import "Model.js" as Model
@@ -37,6 +38,8 @@ Panel {
 
   readonly property bool connected: String(status.connected || "0") === "1"
   readonly property bool missingPbpctrl: String(status.missing_pbpctrl || "0") === "1"
+  readonly property bool adaptiveSupported: String(status.adaptive_supported || "0") === "1"
+  readonly property var ancModes: adaptiveSupported ? Model.ANC_MODES : Model.LEGACY_ANC_MODES
   readonly property string budsName: String(status.name || "Pixel Buds")
   readonly property string anc: pendingAnc !== "" ? pendingAnc : String(status.anc || "unknown")
   readonly property int leftPct: Model.pct(status, "left")
@@ -52,6 +55,20 @@ Panel {
   readonly property bool rightInCase: String(status.right_in_case || "0") === "1"
   readonly property int minPct: Model.budsMin(status)
   readonly property bool anyCharging: leftCharging || rightCharging
+
+  // Bluetooth absolute volume is already the laptop's PipeWire volume. Read
+  // that shared value directly so a swipe on either bud updates this panel
+  // without another RFCOMM query.
+  readonly property var audioSink: Pipewire.defaultAudioSink
+  readonly property string bluezSinkNeedle: String(status.addr || "").replace(/:/g, "_")
+  readonly property bool budsAudioActive: connected && audioSink && audioSink.audio
+      && bluezSinkNeedle !== "" && String(audioSink.name || "").indexOf(bluezSinkNeedle) >= 0
+  readonly property int budsVolumePct: budsAudioActive
+      ? Math.max(0, Math.min(100, Math.round(audioSink.audio.volume * 100))) : -1
+  property bool volumeWatchReady: false
+  property int lastBudsVolumePct: -1
+  readonly property var ancGestureModes: String(controls.ctl_anc_gesture_loop || "")
+      .split(",").filter(function(x) { return x !== "" })
 
   readonly property color fg: bar ? bar.foreground : Color.foreground
   readonly property string fontFamily: bar ? bar.fontFamily : Style.font.family
@@ -169,7 +186,7 @@ Panel {
     // A set is in flight: keep showing the requested mode until the buds
     // confirm it, so the buttons don't flash back to the old state.
     if (pendingAnc !== "" && String(next.anc || "") === pendingAnc) pendingAnc = ""
-    if (opened && !cursorActive) ancIndex = Model.ancIndex(root.anc)
+    if (opened && !cursorActive) ancIndex = root.ancModeIndex(root.anc)
   }
 
   // The plugin never installs anything and never elevates: this only puts
@@ -185,22 +202,91 @@ Panel {
 
   function setAnc(mode) {
     if (!connected || missingPbpctrl) return
-    if (Model.ANC_MODES.indexOf(mode) < 0) return
+    if (ancModes.indexOf(mode) < 0) return
     pendingAnc = mode
     enqueue(["anc", mode])
     enqueue("status")
   }
 
   function cycleAnc(delta) {
-    var i = Model.ancIndex(root.anc)
-    var n = Model.ANC_MODES.length
-    setAnc(Model.ANC_MODES[((i + delta) % n + n) % n])
+    if (!connected || missingPbpctrl || !addrValid) return
+    // Ask the buds to cycle their own configured hold-gesture loop. This
+    // keeps right/middle click identical to a physical long press instead of
+    // maintaining a second, conflicting list in the widget.
+    pendingAnc = ""
+    enqueue(["anc", delta < 0 ? "cycle-prev" : "cycle-next"])
+    enqueue("status")
+  }
+
+  function ancModeIndex(mode) {
+    var i = ancModes.indexOf(String(mode || ""))
+    return i < 0 ? 0 : i
   }
 
   function moveAncCursor(delta) {
-    var n = Model.ANC_MODES.length
+    var n = ancModes.length
     ancIndex = ((ancIndex + delta) % n + n) % n
   }
+
+  function setHoldAction(side, action) {
+    if (action !== "anc" && action !== "assistant") return
+    var left = String(controls.ctl_gesture_left || "")
+    var right = String(controls.ctl_gesture_right || "")
+    if (left === "" || right === "") return
+    if (side === "left") left = action
+    else if (side === "right") right = action
+    else return
+    setControl("gesture-control", left + " " + right)
+  }
+
+  function setAncGestureMode(mode, enabled) {
+    var supported = adaptiveSupported ? Model.ANC_MODES : Model.LEGACY_ANC_MODES
+    if (supported.indexOf(mode) < 0) return
+    var selected = ancGestureModes.slice()
+    var at = selected.indexOf(mode)
+    if (enabled && at < 0) selected.push(mode)
+    else if (!enabled && at >= 0) selected.splice(at, 1)
+    // The buds require at least two modes in their physical cycle.
+    if (selected.length < 2) return
+    var args = supported.map(function(x) { return selected.indexOf(x) >= 0 ? "true" : "false" })
+    setControl("anc-gesture-loop", args.join(" "))
+  }
+
+  function volumeIcon(percent) {
+    if (percent >= 67) return ""
+    if (percent >= 34) return ""
+    if (percent > 0) return ""
+    return ""
+  }
+
+  function showVolumeOsd(percent) {
+    if (!connected || percent < 0 || percent > 100) return
+    Quickshell.execDetached(["omarchy-shell", "osd", "show", JSON.stringify({
+      icon: volumeIcon(percent),
+      value: percent
+    })])
+  }
+
+  function observeBudsVolume() {
+    if (!budsAudioActive || budsVolumePct < 0) {
+      volumeWatchReady = false
+      lastBudsVolumePct = -1
+      return
+    }
+    // Binding the sink or reconnecting establishes a baseline; only a later
+    // real change deserves an OSD.
+    if (!volumeWatchReady) {
+      lastBudsVolumePct = budsVolumePct
+      volumeWatchReady = true
+      return
+    }
+    if (budsVolumePct === lastBudsVolumePct) return
+    lastBudsVolumePct = budsVolumePct
+    showVolumeOsd(budsVolumePct)
+  }
+
+  onBudsAudioActiveChanged: observeBudsVolume()
+  onBudsVolumePctChanged: observeBudsVolume()
 
 
   function tooltip() {
@@ -327,12 +413,14 @@ Panel {
 
   Component.onCompleted: refresh()
 
+  PwObjectTracker { objects: root.audioSink ? [root.audioSink] : [] }
+
   onOpenedChanged: {
     if (opened) {
       if (!connected) { close(); return }
       refresh()
       refreshControls()
-      ancIndex = Model.ancIndex(root.anc)
+      ancIndex = root.ancModeIndex(root.anc)
       cursorActive = false
       advancedOpen = false
     }
@@ -438,7 +526,7 @@ Panel {
         if (!root.cursorActive) { root.cursorActive = true; return }
         root.moveAncCursor(dx !== 0 ? dx : dy)
       }
-      onActivateRequested: if (root.cursorActive) root.setAnc(Model.ANC_MODES[root.ancIndex])
+      onActivateRequested: if (root.cursorActive) root.setAnc(root.ancModes[root.ancIndex])
       onCloseRequested: root.close()
       onTabRequested: function(direction) { root.switchPanel(direction) }
 
@@ -558,6 +646,35 @@ Panel {
           }
         }
 
+        // The buds' swipe gesture and the laptop share Bluetooth absolute
+        // volume. This row follows PipeWire live; BlueZ changes also summon
+        // Omarchy's normal volume OSD even while this panel is closed.
+        Item {
+          visible: root.budsAudioActive
+          width: parent.width
+          implicitHeight: volumeLabel.implicitHeight
+
+          Text {
+            id: volumeLabel
+            textFormat: Text.PlainText
+            anchors.left: parent.left
+            text: "Volume · swipe either bud"
+            color: root.fg
+            opacity: 0.8
+            font.family: root.fontFamily
+            font.pixelSize: Style.font.bodySmall
+          }
+
+          Text {
+            textFormat: Text.PlainText
+            anchors.right: parent.right
+            text: root.budsVolumePct + "%  " + root.volumeIcon(root.budsVolumePct)
+            color: root.fg
+            font.family: root.fontFamily
+            font.pixelSize: Style.font.bodySmall
+          }
+        }
+
         // ---------- Batteries ----------
         Column {
           visible: !root.missingPbpctrl
@@ -604,10 +721,10 @@ Panel {
             id: modeRow
             width: parent.width
             spacing: Style.space(6)
-            readonly property real cellWidth: (width - spacing * (Model.ANC_MODES.length - 1)) / Model.ANC_MODES.length
+            readonly property real cellWidth: (width - spacing * (root.ancModes.length - 1)) / root.ancModes.length
 
             Repeater {
-              model: Model.ANC_MODES
+              model: root.ancModes
               Button {
                 required property var modelData
                 required property int index
@@ -685,6 +802,56 @@ Panel {
           ToggleRow { label: "Speech detection"; ctlKey: "speech-detection"; statusKey: "ctl_speech_detection" }
           ToggleRow { label: "On-head detection"; ctlKey: "ohd"; statusKey: "ctl_ohd" }
           ToggleRow { label: "Volume level alerts"; ctlKey: "volume-exposure-notifications"; statusKey: "ctl_volume_exposure_notifications" }
+
+          PanelSectionHeader {
+            visible: root.controls.ctl_gestures !== undefined
+                || root.controls.ctl_gesture_left !== undefined
+                || root.controls.ctl_anc_gesture_loop !== undefined
+            text: "TOUCH CONTROLS"
+            foreground: root.fg
+            fontFamily: root.fontFamily
+          }
+
+          ToggleRow { label: "Touch controls"; ctlKey: "gestures"; statusKey: "ctl_gestures" }
+          HoldActionRow { label: "Left hold"; side: "left"; statusKey: "ctl_gesture_left" }
+          HoldActionRow { label: "Right hold"; side: "right"; statusKey: "ctl_gesture_right" }
+
+          Column {
+            visible: root.controls.ctl_anc_gesture_loop !== undefined
+            width: parent.width
+            spacing: Style.space(6)
+
+            Text {
+              textFormat: Text.PlainText
+              text: "Hold gesture cycles"
+              color: root.fg
+              opacity: 0.8
+              font.family: root.fontFamily
+              font.pixelSize: Style.font.bodySmall
+            }
+
+            Row {
+              width: parent.width
+              spacing: Style.space(6)
+              Repeater {
+                model: root.ancModes
+                Button {
+                  required property var modelData
+                  readonly property bool selected: root.ancGestureModes.indexOf(String(modelData)) >= 0
+                  width: (parent.width - parent.spacing * (root.ancModes.length - 1)) / root.ancModes.length
+                  text: Model.ancShort(String(modelData))
+                  fontSize: Style.font.bodySmall
+                  foreground: root.fg
+                  fontFamily: root.fontFamily
+                  horizontalPadding: Style.spacing.controlPaddingX
+                  verticalPadding: Style.spacing.controlPaddingY
+                  bordered: true
+                  active: selected
+                  onClicked: root.setAncGestureMode(String(modelData), !selected)
+                }
+              }
+            }
+          }
 
           PanelSectionHeader {
             visible: root.controls.ctl_volume_eq !== undefined
@@ -845,6 +1012,52 @@ Panel {
       bordered: true
       active: trow.on
       onClicked: root.setControl(trow.ctlKey, trow.on ? "false" : "true")
+    }
+  }
+
+  component HoldActionRow: Item {
+    id: hrow
+    property string label: ""
+    property string side: ""
+    property string statusKey: ""
+    readonly property string action: String(root.controls[statusKey] || "")
+    readonly property bool known: action === "anc" || action === "assistant"
+
+    visible: known
+    width: parent.width
+    implicitHeight: known ? holdButtons.implicitHeight : 0
+
+    Text {
+      textFormat: Text.PlainText
+      anchors.left: parent.left
+      anchors.verticalCenter: parent.verticalCenter
+      text: hrow.label
+      color: root.fg
+      opacity: 0.8
+      font.family: root.fontFamily
+      font.pixelSize: Style.font.bodySmall
+    }
+
+    Row {
+      id: holdButtons
+      anchors.right: parent.right
+      spacing: Style.space(4)
+
+      Repeater {
+        model: ["anc", "assistant"]
+        Button {
+          required property var modelData
+          text: String(modelData) === "anc" ? "ANC" : "Assistant"
+          fontSize: Style.font.bodySmall
+          foreground: root.fg
+          fontFamily: root.fontFamily
+          horizontalPadding: Style.spacing.controlPaddingX
+          verticalPadding: Style.spacing.controlPaddingY
+          bordered: true
+          active: hrow.action === String(modelData)
+          onClicked: root.setHoldAction(hrow.side, String(modelData))
+        }
+      }
     }
   }
 

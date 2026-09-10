@@ -60,6 +60,15 @@ if ! command -v pbpctrl >/dev/null 2>&1; then
   exit 0
 fi
 
+# Adaptive ANC landed after pbpctrl 0.1.8 and has not been released yet.
+# Capability-gate it from the CLI's own accepted values instead of assuming a
+# package version, since downstream packages can backport the command.
+if pbpctrl set anc --help 2>&1 | grep 'possible values:' | grep -q 'adaptive'; then
+  echo "adaptive_supported=1"
+else
+  echo "adaptive_supported=0"
+fi
+
 # pbpctrl opens its own RFCOMM session, and doing that against a device that
 # is mid-disconnect re-establishes the link — the plugin must never be the
 # reason the buds refuse to let go. So re-verify the link right before
@@ -137,13 +146,38 @@ echo "anc=$anc"
 # Same guard before the burst of control reads: never chase a leaving device.
 is_conn || exit 0
 
-for k in multipoint ohd speech-detection volume-exposure-notifications volume-eq mono; do
+for k in multipoint ohd speech-detection volume-exposure-notifications volume-eq mono gestures; do
   cap 256 timeout --foreground 15 "$here/pbpctrl-locked.sh" -d "$addr" get "$k" || out=""
   v=$(line1 "$out" 8)
   case "$v" in
     true|false) echo "ctl_$(printf '%s' "$k" | tr - _)=$v" ;;
   esac
 done
+
+# Per-side long-press actions. Both sides are written together by pbpctrl, so
+# retain them as separate fields for the two UI rows.
+cap 256 timeout --foreground 15 "$here/pbpctrl-locked.sh" -d "$addr" get gesture-control || out=""
+gest=$(line1 "$out" 64)
+case "$gest" in
+  left:\ *,\ right:\ *)
+    gl=${gest#left: }; gl=${gl%%,*}
+    gr=${gest##*right: }
+    case "$gl" in anc|assistant) echo "ctl_gesture_left=$gl" ;; esac
+    case "$gr" in anc|assistant) echo "ctl_gesture_right=$gr" ;; esac
+    ;;
+esac
+
+# Modes cycled by a long press on the buds. Newer pbpctrl builds can include
+# adaptive; stable 0.1.8 reports the legacy three-mode set.
+cap 256 timeout --foreground 15 "$here/pbpctrl-locked.sh" -d "$addr" get anc-gesture-loop || out=""
+loopv=$(line1 "$out" 96)
+case "$loopv" in
+  \[*\])
+    loopc=$(printf '%s' "$loopv" | tr -d '[] ')
+    printf '%s' "$loopc" | grep -Eq '^(off|active|aware|adaptive)(,(off|active|aware|adaptive))*$' \
+      && echo "ctl_anc_gesture_loop=$loopc"
+    ;;
+esac
 
 # "left: 100%, right: 80%" -> -100..100 (negative = toward the left)
 cap 256 timeout --foreground 15 "$here/pbpctrl-locked.sh" -d "$addr" get balance || out=""

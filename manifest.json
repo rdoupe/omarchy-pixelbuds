@@ -2,10 +2,10 @@
   "schemaVersion": 1,
   "id": "io.github.rdoupe.pixelbuds",
   "name": "Pixel Buds",
-  "version": "1.4.1",
+  "version": "1.5.0",
   "author": "Ryan Doupe",
   "license": "MIT",
-  "description": "Pixel Buds Pro in the Omarchy bar — battery per bud and case, ANC / Transparency / Adaptive, and device + sound controls (multipoint, speech detection, on-head, EQ, balance). Event-driven: the icon appears the moment your buds connect. Needs pbpctrl (AUR); the popup walks you through installing it if it’s missing. Optional: bind a hotkey to omarchy-shell io.github.rdoupe.pixelbuds cycleAnc / toggle.",
+  "description": "Pixel Buds Pro in the Omarchy bar — battery per bud and case, listening modes, shared volume with swipe OSD, touch gestures, and device + sound controls (multipoint, speech detection, on-head, EQ, balance). Event-driven: the icon appears the moment your buds connect. Needs pbpctrl (AUR); the popup walks you through installing it if missing.",
   "kinds": [
     "bar-widget"
   ],
@@ -14,7 +14,7 @@
   },
   "barWidget": {
     "displayName": "Pixel Buds",
-    "description": "Battery per bud and case, listening modes, and an Advanced section with device toggles, EQ, balance and mono. Needs pbpctrl (AUR).",
+    "description": "Battery, listening modes, shared volume with swipe OSD, touch gestures, and advanced sound controls. Needs pbpctrl (AUR).",
     "category": "System",
     "allowMultiple": false,
     "defaultSection": "right",
