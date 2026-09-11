@@ -40,10 +40,9 @@ thing.
   — paste it into a terminal to install. The plugin itself never installs
   software and never elevates privileges.
 - BlueZ (`bluetoothctl`) and glib2 (`gdbus`) — both ship with Omarchy.
-- util-linux (`flock`) — ships with Omarchy and serializes the Pixel Buds
-  control channel across bars on multiple monitors.
-- `python3` (ships with Omarchy) for the small race-free case-battery cache
-  helper; without it that one feature is simply skipped.
+- `python3` (ships with Omarchy) for the descriptor-safe `pbpctrl` runtime lock
+  (fcntl flock on a no-follow fd) and the race-free case-battery cache helper.
+  The lock fails closed without it.
 - Pixel Buds supported by `pbpctrl` (Pixel Buds Pro generation).
 
 ## Install
@@ -91,10 +90,12 @@ Handy for keybindings.
 then does it talk to the buds over RFCOMM via `pbpctrl` for battery, placement,
 and ANC state. Because Omarchy creates a bar instance on each monitor, all
 `pbpctrl` calls share a runtime lock so their BlueZ profile registrations never
-overlap. Connect/disconnect detection is event-driven: a `gdbus` signal
-subscription on `org.bluez` triggers a refresh the moment any device's
-`Connected` state flips, with a short follow-up pass once the buds' RFCOMM
-channel settles.
+overlap. The lock is an atomic no-follow descriptor open of a private XDG
+runtime file: owner, type, and link-count are checked on the opened fd, never
+by stating a pathname and opening it later. Connect/disconnect detection is
+event-driven: a `gdbus` signal subscription on `org.bluez` triggers a refresh
+the moment any device's `Connected` state flips, with a short follow-up pass
+once the buds' RFCOMM channel settles.
 
 ## License
 

@@ -5,6 +5,7 @@ repo=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
 tmp=$(mktemp -d)
 trap 'rm -rf "$tmp"' EXIT HUP INT TERM
 mkdir "$tmp/bin" "$tmp/runtime" "$tmp/state"
+chmod 700 "$tmp/runtime"
 
 cat >"$tmp/bin/bluetoothctl" <<'EOF'
 #!/bin/sh

@@ -1,65 +1,172 @@
-#!/bin/sh
-# Omarchy creates one bar-widget instance per monitor. Serialize the RFCOMM
-# profile registration across those instances so BlueZ never receives two
-# simultaneous pbpctrl sessions for the same vendor UUID.
+#!/usr/bin/env python3
+"""Serialize pbpctrl behind a descriptor-safe XDG runtime lock.
 
-runtime_dir=${XDG_RUNTIME_DIR:-/run/user/$(id -u)}
-[ -d "$runtime_dir" ] || {
-  echo "pbpctrl lock directory is unavailable: $runtime_dir" >&2
-  exit 75
-}
+Omarchy creates one bar-widget instance per monitor. This helper holds an
+exclusive flock across those instances so BlueZ never receives two simultaneous
+pbpctrl sessions for the same vendor UUID.
 
-uid=$(id -u)
+The lock is created and opened atomically with O_NOFOLLOW (O_EXCL on create,
+non-truncating reopen) relative to a verified private runtime directory fd.
+Owner, type, and link-count checks run on the opened file itself — a pathname
+is never checked and then opened separately. After flock the same descriptor is
+revalidated, then pbpctrl is exec'd with the lock fd held.
+"""
+from __future__ import annotations
 
-owner_uid() { stat -Lc '%u' "$1" 2>/dev/null; }
+import fcntl
+import os
+import signal
+import stat
+import sys
 
-verify_private_dir() {
-  p=$1
-  [ -d "$p" ] || return 1
-  [ ! -L "$p" ] || return 1
-  [ "$(owner_uid "$p")" = "$uid" ] || return 1
-}
+RUNTIME_SUBDIR = "omarchy-pixelbuds"
+LOCK_NAME = "pbpctrl.lock"
+LOCK_WAIT_SEC = 8
+EX_TEMPFAIL = 75
 
-verify_regular_file() {
-  p=$1
-  [ -f "$p" ] || return 1
-  [ ! -L "$p" ] || return 1
-  [ "$(owner_uid "$p")" = "$uid" ] || return 1
-}
+DIR_OPEN_FLAGS = os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW | os.O_CLOEXEC
+LOCK_CREATE_FLAGS = (
+    os.O_RDWR | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW | os.O_CLOEXEC | os.O_NONBLOCK
+)
+LOCK_REOPEN_FLAGS = os.O_RDWR | os.O_NOFOLLOW | os.O_CLOEXEC | os.O_NONBLOCK
 
-verify_private_dir "$runtime_dir" || {
-  echo "pbpctrl lock runtime dir must be owned by uid $uid and not a symlink" >&2
-  exit 75
-}
 
-lock_dir="$runtime_dir/omarchy-pixelbuds"
-if [ ! -e "$lock_dir" ]; then
-  umask 077
-  mkdir "$lock_dir" 2>/dev/null || :
-fi
-verify_private_dir "$lock_dir" || {
-  echo "pbpctrl lock directory is unsafe: $lock_dir" >&2
-  exit 75
-}
-chmod 700 "$lock_dir" 2>/dev/null || {
-  echo "pbpctrl lock directory permissions are unsafe: $lock_dir" >&2
-  exit 75
-}
+class LockTimeout(Exception):
+    """Exclusive flock wait exceeded LOCK_WAIT_SEC."""
 
-lock_file="$lock_dir/pbpctrl.lock"
-if [ ! -e "$lock_file" ]; then
-  umask 077
-  : >"$lock_file" 2>/dev/null || :
-fi
-verify_regular_file "$lock_file" || {
-  echo "pbpctrl lock file is unsafe: $lock_file" >&2
-  exit 75
-}
 
-umask 077
-exec 9<>"$lock_file" || exit 75
-flock -w 8 9 || {
-  echo "timed out waiting for another Pixel Buds control operation" >&2
-  exit 75
-}
-exec pbpctrl "$@"
+def require_nofollow_support():
+    if not hasattr(os, "O_NOFOLLOW") or not hasattr(os, "O_DIRECTORY") or not hasattr(os, "O_EXCL"):
+        raise RuntimeError("pbpctrl lock requires no-follow exclusive open support")
+
+
+def runtime_path():
+    runtime = os.environ.get("XDG_RUNTIME_DIR") or ("/run/user/%d" % os.geteuid())
+    if not runtime or not os.path.isabs(runtime) or "\x00" in runtime:
+        raise RuntimeError("pbpctrl lock runtime dir is invalid")
+    return runtime.rstrip("/") or runtime
+
+
+def _require_private_dir(fd, label):
+    info = os.fstat(fd)
+    if not stat.S_ISDIR(info.st_mode):
+        raise RuntimeError("%s is not a directory" % label)
+    if info.st_uid != os.geteuid():
+        raise RuntimeError("%s has an unexpected owner" % label)
+    if info.st_mode & 0o077:
+        raise RuntimeError("%s is accessible to others" % label)
+    return info
+
+
+def _require_private_lock(fd):
+    info = os.fstat(fd)
+    if not stat.S_ISREG(info.st_mode):
+        raise RuntimeError("pbpctrl lock file is not a regular file")
+    if info.st_uid != os.geteuid():
+        raise RuntimeError("pbpctrl lock file has an unexpected owner")
+    if info.st_nlink != 1:
+        raise RuntimeError("pbpctrl lock file has an unexpected link count")
+    if info.st_mode & 0o177:
+        raise RuntimeError("pbpctrl lock file is accessible to others")
+    return info
+
+
+def _close_quietly(*fds):
+    for fd in fds:
+        if fd is not None:
+            try:
+                os.close(fd)
+            except OSError:
+                pass
+
+
+def _open_lock_fd(private_fd):
+    try:
+        fd = os.open(LOCK_NAME, LOCK_CREATE_FLAGS, 0o600, dir_fd=private_fd)
+    except FileExistsError:
+        try:
+            fd = os.open(LOCK_NAME, LOCK_REOPEN_FLAGS, dir_fd=private_fd)
+        except OSError as error:
+            raise RuntimeError("pbpctrl lock file is unsafe") from error
+    except OSError as error:
+        raise RuntimeError("pbpctrl lock file is unsafe") from error
+    try:
+        _require_private_lock(fd)
+        flags = fcntl.fcntl(fd, fcntl.F_GETFL)
+        fcntl.fcntl(fd, fcntl.F_SETFL, flags & ~os.O_NONBLOCK)
+    except Exception:
+        os.close(fd)
+        raise
+    return fd
+
+
+def _acquire_exclusive(fd, timeout=LOCK_WAIT_SEC):
+    def _timeout(_signum, _frame):
+        raise LockTimeout()
+
+    prev = signal.signal(signal.SIGALRM, _timeout)
+    signal.alarm(timeout)
+    try:
+        fcntl.flock(fd, fcntl.LOCK_EX)
+    finally:
+        signal.alarm(0)
+        signal.signal(signal.SIGALRM, prev)
+
+
+def acquire_lock():
+    """Open, validate, flock, and revalidate the pbpctrl lock. Returns a held fd."""
+    require_nofollow_support()
+    runtime = runtime_path()
+    runtime_fd = private_fd = lock_fd = None
+    try:
+        try:
+            runtime_fd = os.open(runtime, DIR_OPEN_FLAGS)
+        except OSError as error:
+            raise RuntimeError("pbpctrl lock runtime dir is unavailable") from error
+        _require_private_dir(runtime_fd, "pbpctrl lock runtime dir")
+        try:
+            os.mkdir(RUNTIME_SUBDIR, 0o700, dir_fd=runtime_fd)
+        except FileExistsError:
+            pass
+        except OSError as error:
+            raise RuntimeError("pbpctrl lock directory is unsafe") from error
+        try:
+            private_fd = os.open(RUNTIME_SUBDIR, DIR_OPEN_FLAGS, dir_fd=runtime_fd)
+        except OSError as error:
+            raise RuntimeError("pbpctrl lock directory is unsafe") from error
+        if stat.S_IMODE(os.fstat(private_fd).st_mode) & 0o077:
+            os.fchmod(private_fd, 0o700)
+        _require_private_dir(private_fd, "pbpctrl lock directory")
+        lock_fd = _open_lock_fd(private_fd)
+        _acquire_exclusive(lock_fd)
+        _require_private_lock(lock_fd)
+        os.set_inheritable(lock_fd, True)
+        held = lock_fd
+        lock_fd = None
+        return held
+    finally:
+        _close_quietly(lock_fd, private_fd, runtime_fd)
+
+
+def main(argv):
+    try:
+        acquire_lock()
+    except LockTimeout:
+        print("timed out waiting for another Pixel Buds control operation", file=sys.stderr)
+        return EX_TEMPFAIL
+    except (OSError, RuntimeError) as error:
+        print("pbpctrl lock is unsafe: %s" % error, file=sys.stderr)
+        return EX_TEMPFAIL
+    try:
+        os.execvp("pbpctrl", ["pbpctrl"] + argv[1:])
+    except FileNotFoundError:
+        print("pbpctrl not found", file=sys.stderr)
+        return 127
+    except OSError as error:
+        print("pbpctrl exec failed: %s" % error, file=sys.stderr)
+        return EX_TEMPFAIL
+    return EX_TEMPFAIL
+
+
+if __name__ == "__main__":
+    raise SystemExit(main(sys.argv))
