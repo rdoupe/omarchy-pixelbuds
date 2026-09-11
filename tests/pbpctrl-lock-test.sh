@@ -5,6 +5,7 @@ repo=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
 tmp=$(mktemp -d)
 trap 'rm -rf "$tmp"' EXIT HUP INT TERM
 mkdir "$tmp/bin" "$tmp/runtime"
+chmod 700 "$tmp/runtime"
 
 cat >"$tmp/bin/pbpctrl" <<'EOF'
 #!/bin/sh
