@@ -41,8 +41,8 @@ if grep -q 'os.execvp' "$helper"; then
 fi
 grep -q 'os.execve' "$helper" || fail "lock helper must execve a trusted absolute pbpctrl"
 case "$(head -n1 "$helper")" in
-  "#!/usr/bin/python3"|"#!/usr/bin/python3 -I") ;;
-  *) fail "lock helper shebang must be an absolute python3, not /usr/bin/env" ;;
+  "#!/usr/bin/python3 -I") ;;
+  *) fail "lock helper shebang must be isolated /usr/bin/python3 -I" ;;
 esac
 
 # Happy path: create the private dir + lock via descriptor-safe open.

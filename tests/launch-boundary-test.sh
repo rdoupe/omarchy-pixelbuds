@@ -50,12 +50,12 @@ grep -q 'Model.clip(raw, root.controlsStdoutCeiling)' "$qml" || fail "applyContr
 
 # --- Shebangs / exec identity ---
 case "$(head -n1 "$helper")" in
-  "#!/usr/bin/python3"|"#!/usr/bin/python3 -I") ;;
-  *) fail "pbpctrl-locked.sh shebang is not absolute python3" ;;
+  "#!/usr/bin/python3 -I") ;;
+  *) fail "pbpctrl-locked.sh shebang must be isolated /usr/bin/python3 -I" ;;
 esac
 case "$(head -n1 "$cache")" in
-  "#!/usr/bin/python3"|"#!/usr/bin/python3 -I") ;;
-  *) fail "casecache.py shebang is not absolute python3" ;;
+  "#!/usr/bin/python3 -I") ;;
+  *) fail "casecache.py shebang must be isolated /usr/bin/python3 -I" ;;
 esac
 ! grep -q 'os.execvp' "$helper" || fail "pbpctrl-locked.sh still uses execvp"
 grep -q 'os.execve' "$helper" || fail "pbpctrl-locked.sh must execve"
