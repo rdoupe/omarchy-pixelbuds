@@ -9,16 +9,18 @@ chmod 700 "$tmp/runtime"
 
 cat >"$tmp/bin/pbpctrl" <<'EOF'
 #!/bin/sh
-printf 'start\n' >>"$PBPCTRL_TEST_LOG"
+printf 'start\n' >>"$XDG_RUNTIME_DIR/pbpctrl-events"
 sleep 1
-printf 'end\n' >>"$PBPCTRL_TEST_LOG"
+printf 'end\n' >>"$XDG_RUNTIME_DIR/pbpctrl-events"
 printf '%s\n' "$*"
 EOF
 chmod +x "$tmp/bin/pbpctrl"
 
-export PATH="$tmp/bin:$PATH"
+# Stubs are selected by the trusted-dir allowlist. The child env is closed,
+# so the fake pbpctrl records overlap via XDG_RUNTIME_DIR, not extra vars.
+export PIXELBUDS_TRUSTED_PATH="$tmp/bin"
+export PATH="/usr/bin:/bin"
 export XDG_RUNTIME_DIR="$tmp/runtime"
-export PBPCTRL_TEST_LOG="$tmp/events"
 
 "$repo/pbpctrl-locked.sh" -d AA:BB:CC:DD:EE:FF get anc >"$tmp/first" &
 first=$!
@@ -27,7 +29,7 @@ second=$!
 wait "$first"
 wait "$second"
 
-events=$(tr '\n' ' ' <"$tmp/events")
+events=$(tr '\n' ' ' <"$tmp/runtime/pbpctrl-events")
 [ "$events" = "start end start end " ] || {
   echo "pbpctrl calls overlapped: $events" >&2
   exit 1

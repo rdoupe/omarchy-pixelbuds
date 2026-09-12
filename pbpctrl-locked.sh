@@ -1,4 +1,4 @@
-#!/usr/bin/env python3
+#!/usr/bin/python3 -I
 """Serialize pbpctrl behind a descriptor-safe XDG runtime lock.
 
 Omarchy creates one bar-widget instance per monitor. This helper holds an
@@ -23,6 +23,16 @@ RUNTIME_SUBDIR = "omarchy-pixelbuds"
 LOCK_NAME = "pbpctrl.lock"
 LOCK_WAIT_SEC = 8
 EX_TEMPFAIL = 75
+DEFAULT_TRUSTED_PATH = "/usr/bin:/bin"
+# Test stubs only. Production QML does not forward this variable.
+TRUSTED_PATH_ENV = "PIXELBUDS_TRUSTED_PATH"
+SESSION_ENV_KEYS = (
+    "HOME", "USER", "LOGNAME",
+    "LANG", "LC_ALL", "LC_CTYPE",
+    "XDG_RUNTIME_DIR", "XDG_STATE_HOME",
+    "DBUS_SYSTEM_BUS_ADDRESS", "DBUS_SESSION_BUS_ADDRESS",
+    "WAYLAND_DISPLAY",
+)
 
 DIR_OPEN_FLAGS = os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW | os.O_CLOEXEC
 LOCK_CREATE_FLAGS = (
@@ -33,6 +43,65 @@ LOCK_REOPEN_FLAGS = os.O_RDWR | os.O_NOFOLLOW | os.O_CLOEXEC | os.O_NONBLOCK
 
 class LockTimeout(Exception):
     """Exclusive flock wait exceeded LOCK_WAIT_SEC."""
+
+
+def trusted_path_dirs():
+    """Allowlisted absolute directories. Never consult ambient PATH."""
+    extra = os.environ.get(TRUSTED_PATH_ENV, "")
+    parts = []
+    if extra:
+        parts.extend(extra.split(os.pathsep))
+    parts.extend(DEFAULT_TRUSTED_PATH.split(os.pathsep))
+    dirs = []
+    seen = set()
+    for part in parts:
+        if not part or not os.path.isabs(part) or ".." in part.split(os.sep):
+            continue
+        part = part.rstrip("/") or part
+        if part not in seen:
+            seen.add(part)
+            dirs.append(part)
+    return dirs or ["/usr/bin", "/bin"]
+
+
+def _is_trusted_real(real, dirs):
+    for directory in dirs:
+        if real == directory or real.startswith(directory + os.sep):
+            return True
+    return False
+
+
+def resolve_trusted_exec(name):
+    """Return an allowlisted absolute executable. Never search ambient PATH."""
+    if not name or name in (".", "..") or os.sep in name:
+        raise RuntimeError("pbpctrl tool name is unsafe")
+    dirs = trusted_path_dirs()
+    for directory in dirs:
+        candidate = os.path.join(directory, name)
+        try:
+            if not os.path.lexists(candidate):
+                continue
+            real = os.path.realpath(candidate)
+            if not os.path.isfile(real) or not os.access(real, os.X_OK):
+                continue
+        except OSError:
+            continue
+        if _is_trusted_real(real, dirs):
+            return real
+    raise FileNotFoundError(name)
+
+
+def closed_env():
+    """Allowlist only. Drops PYTHON*, LD_*, and ambient PATH."""
+    env = {
+        "PATH": DEFAULT_TRUSTED_PATH,
+        "LANG": os.environ.get("LANG") or "C.UTF-8",
+    }
+    for key in SESSION_ENV_KEYS:
+        value = os.environ.get(key)
+        if value:
+            env[key] = value
+    return env
 
 
 def require_nofollow_support():
@@ -150,6 +219,14 @@ def acquire_lock():
 
 def main(argv):
     try:
+        pbpctrl = resolve_trusted_exec("pbpctrl")
+    except FileNotFoundError:
+        print("pbpctrl not found", file=sys.stderr)
+        return 127
+    except RuntimeError as error:
+        print("pbpctrl lock is unsafe: %s" % error, file=sys.stderr)
+        return EX_TEMPFAIL
+    try:
         acquire_lock()
     except LockTimeout:
         print("timed out waiting for another Pixel Buds control operation", file=sys.stderr)
@@ -158,10 +235,7 @@ def main(argv):
         print("pbpctrl lock is unsafe: %s" % error, file=sys.stderr)
         return EX_TEMPFAIL
     try:
-        os.execvp("pbpctrl", ["pbpctrl"] + argv[1:])
-    except FileNotFoundError:
-        print("pbpctrl not found", file=sys.stderr)
-        return 127
+        os.execve(pbpctrl, [pbpctrl] + argv[1:], closed_env())
     except OSError as error:
         print("pbpctrl exec failed: %s" % error, file=sys.stderr)
         return EX_TEMPFAIL

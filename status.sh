@@ -7,10 +7,58 @@
 # Everything read from bluetoothctl or pbpctrl is device-controlled, so every
 # capture is byte-bounded, runs under a deadline, and is killable: a TERM from
 # the shell (a user disconnect) stops the in-flight pbpctrl immediately.
+#
+# Ambient PATH is closed immediately. Tools are resolved from /usr/bin:/bin
+# (plus PIXELBUDS_TRUSTED_PATH for test stubs). Never PATH lookup or env shebang.
 
-tmpd=$(mktemp -d) || exit 0
+# Capture the test-only extra dir list, then drop ambient PATH before any lookup.
+PIXELBUDS_TRUSTED_PATH=${PIXELBUDS_TRUSTED_PATH:-}
+PATH=/usr/bin:/bin
+export PATH
+
+resolve_tool() {
+  _name=$1
+  case "$_name" in
+    ''|.|..|*/*) return 1 ;;
+  esac
+  _search="${PIXELBUDS_TRUSTED_PATH:+$PIXELBUDS_TRUSTED_PATH:}/usr/bin:/bin"
+  _oldifs=$IFS
+  IFS=:
+  set -f
+  for _dir in $_search; do
+    IFS=$_oldifs
+    set +f
+    case "$_dir" in
+      /*) ;;
+      *) continue ;;
+    esac
+    case "$_dir" in
+      *..*) continue ;;
+    esac
+    _cand="${_dir%/}/$_name"
+    if [ -f "$_cand" ] && [ -x "$_cand" ]; then
+      printf '%s\n' "$_cand"
+      return 0
+    fi
+  done
+  IFS=$_oldifs
+  set +f
+  return 1
+}
+
+SH=$(resolve_tool sh) || exit 0
+SETSID=$(resolve_tool setsid) || exit 0
+HEAD=$(resolve_tool head) || exit 0
+TIMEOUT=$(resolve_tool timeout) || exit 0
+MKTEMP=$(resolve_tool mktemp) || exit 0
+DIRNAME=$(resolve_tool dirname) || exit 0
+PYTHON3=$(resolve_tool python3) || PYTHON3=""
+BLUETOOTHCTL=$(resolve_tool bluetoothctl) || BLUETOOTHCTL=""
+PBPCTRL=$(resolve_tool pbpctrl) || PBPCTRL=""
+
+tmpd=$("$MKTEMP" -d) || exit 0
 child=""
-here=$(dirname "$0")
+here=$("$DIRNAME" "$0")
 cleanup() { [ -n "$child" ] && kill -TERM -- "-$child" 2>/dev/null; rm -rf "$tmpd"; }
 trap 'cleanup; exit 143' TERM INT HUP
 trap cleanup EXIT
@@ -23,19 +71,23 @@ trap cleanup EXIT
 # forwarding to pbpctrl. Empty output counts as failure.
 cap() {
   max=$1; shift
-  MAX="$max" setsid sh -c '"$@" 2>/dev/null | head -c "$MAX"' sh "$@" >"$tmpd/o" &
+  MAX="$max" HEAD="$HEAD" "$SETSID" "$SH" -c '"$@" 2>/dev/null | "$HEAD" -c "$MAX"' "$SH" "$@" >"$tmpd/o" &
   child=$!
   wait "$child"; child=""
   out=$(cat "$tmpd/o")
   [ -n "$out" ]
 }
 
+# The lock helper is launched as /usr/bin/python3 -I <script> so the kernel
+# shebang is never a PATH search and PYTHON* cannot load user site-packages.
+
 # line1 <text> <maxchars>: first line, truncated.
 line1() { printf '%s\n' "$1" | head -n1 | cut -c1-"$2"; }
 
 is_num() { printf '%s' "$1" | grep -Eq '^[0-9]{1,3}$' && [ "$1" -le 100 ]; }
 
-cap 8192 timeout --foreground 5 bluetoothctl devices Connected || out=""
+[ -n "$BLUETOOTHCTL" ] || { echo "connected=0"; exit 0; }
+cap 8192 "$TIMEOUT" --foreground 5 "$BLUETOOTHCTL" devices Connected || out=""
 dev=$(printf '%s\n' "$out" | grep -i 'pixel buds' | head -n1 | cut -c1-200)
 if [ -z "$dev" ]; then
   echo "connected=0"
@@ -54,16 +106,22 @@ echo "name=$name"
 
 # Buds are connected: surface a missing pbpctrl instead of hiding the widget,
 # so a fresh install isn't just silently invisible.
-if ! command -v pbpctrl >/dev/null 2>&1; then
+if [ -z "$PBPCTRL" ]; then
   echo "missing_pbpctrl=1"
   echo "error=pbpctrl is not installed"
+  exit 0
+fi
+if [ -z "$PYTHON3" ]; then
+  echo "error=python3 is not installed"
   exit 0
 fi
 
 # Adaptive ANC landed after pbpctrl 0.1.8 and has not been released yet.
 # Capability-gate it from the CLI's own accepted values instead of assuming a
 # package version, since downstream packages can backport the command.
-if pbpctrl set anc --help 2>&1 | grep 'possible values:' | grep -q 'adaptive'; then
+# Help is local CLI metadata (not RFCOMM); still bound and deadlined.
+helpout=$("$TIMEOUT" --foreground 5 "$PBPCTRL" set anc --help 2>&1 | "$HEAD" -c 4096) || helpout=""
+if printf '%s\n' "$helpout" | grep 'possible values:' | grep -q 'adaptive'; then
   echo "adaptive_supported=1"
 else
   echo "adaptive_supported=0"
@@ -75,12 +133,12 @@ fi
 # talking, and treat a failure followed by a gone link as a plain disconnect
 # (a later connected=0 overrides the connected=1 printed above).
 is_conn() {
-  cap 8192 timeout --foreground 5 bluetoothctl info "$addr" && printf '%s\n' "$out" | grep -q 'Connected: yes'
+  cap 8192 "$TIMEOUT" --foreground 5 "$BLUETOOTHCTL" info "$addr" && printf '%s\n' "$out" | grep -q 'Connected: yes'
 }
 
 is_conn || { echo "connected=0"; exit 0; }
 
-if ! cap 8192 timeout --foreground 15 "$here/pbpctrl-locked.sh" -d "$addr" show runtime; then
+if ! cap 8192 "$TIMEOUT" --foreground 15 "$PYTHON3" -I "$here/pbpctrl-locked.sh" -d "$addr" show runtime; then
   if is_conn; then echo "error=pbpctrl show runtime failed"; else echo "connected=0"; fi
   exit 0
 fi
@@ -117,12 +175,12 @@ printf '%s\n' "$parsed"
 # mirror Android: remember the last reading and surface it while it is stale.
 # The cache is handled by casecache.py, which works through a held directory
 # descriptor with O_NOFOLLOW and fstat-on-descriptor checks — no pathname is
-# ever checked and then used. Without python3 the feature is simply skipped.
+# ever checked and then used. python3 is also required for the runtime lock.
 case_now=$(printf '%s\n' "$parsed" | sed -n 's/^case=//p' | head -n1)
-if command -v python3 >/dev/null 2>&1; then
+if [ -n "$PYTHON3" ]; then
   if is_num "$case_now"; then
-    python3 "$here/casecache.py" put "$case_now" 2>/dev/null
-  elif cap 64 python3 "$here/casecache.py" get; then
+    "$PYTHON3" -I "$here/casecache.py" put "$case_now" 2>/dev/null
+  elif cap 64 "$PYTHON3" -I "$here/casecache.py" get; then
     last_pct=${out%% *}; last_ts=${out#* }; last_ts=${last_ts%%[!0-9]*}
     now=$(date +%s)
     if is_num "$last_pct" && printf '%s' "$last_ts" | grep -Eq '^[0-9]{1,12}$' \
@@ -133,7 +191,7 @@ if command -v python3 >/dev/null 2>&1; then
   fi
 fi
 
-cap 256 timeout --foreground 15 "$here/pbpctrl-locked.sh" -d "$addr" get anc || out=""
+cap 256 "$TIMEOUT" --foreground 15 "$PYTHON3" -I "$here/pbpctrl-locked.sh" -d "$addr" get anc || out=""
 anc=$(line1 "$out" 16)
 case "$anc" in off|active|aware|adaptive) ;; *) anc=unknown ;; esac
 echo "anc=$anc"
@@ -147,7 +205,7 @@ echo "anc=$anc"
 is_conn || exit 0
 
 for k in multipoint ohd speech-detection volume-exposure-notifications volume-eq mono gestures; do
-  cap 256 timeout --foreground 15 "$here/pbpctrl-locked.sh" -d "$addr" get "$k" || out=""
+  cap 256 "$TIMEOUT" --foreground 15 "$PYTHON3" -I "$here/pbpctrl-locked.sh" -d "$addr" get "$k" || out=""
   v=$(line1 "$out" 8)
   case "$v" in
     true|false) echo "ctl_$(printf '%s' "$k" | tr - _)=$v" ;;
@@ -156,7 +214,7 @@ done
 
 # Per-side long-press actions. Both sides are written together by pbpctrl, so
 # retain them as separate fields for the two UI rows.
-cap 256 timeout --foreground 15 "$here/pbpctrl-locked.sh" -d "$addr" get gesture-control || out=""
+cap 256 "$TIMEOUT" --foreground 15 "$PYTHON3" -I "$here/pbpctrl-locked.sh" -d "$addr" get gesture-control || out=""
 gest=$(line1 "$out" 64)
 case "$gest" in
   left:\ *,\ right:\ *)
@@ -169,7 +227,7 @@ esac
 
 # Modes cycled by a long press on the buds. Newer pbpctrl builds can include
 # adaptive; stable 0.1.8 reports the legacy three-mode set.
-cap 256 timeout --foreground 15 "$here/pbpctrl-locked.sh" -d "$addr" get anc-gesture-loop || out=""
+cap 256 "$TIMEOUT" --foreground 15 "$PYTHON3" -I "$here/pbpctrl-locked.sh" -d "$addr" get anc-gesture-loop || out=""
 loopv=$(line1 "$out" 96)
 case "$loopv" in
   \[*\])
@@ -180,7 +238,7 @@ case "$loopv" in
 esac
 
 # "left: 100%, right: 80%" -> -100..100 (negative = toward the left)
-cap 256 timeout --foreground 15 "$here/pbpctrl-locked.sh" -d "$addr" get balance || out=""
+cap 256 "$TIMEOUT" --foreground 15 "$PYTHON3" -I "$here/pbpctrl-locked.sh" -d "$addr" get balance || out=""
 bal=$(line1 "$out" 64)
 case "$bal" in
   left:*)
@@ -193,7 +251,7 @@ case "$bal" in
 esac
 
 # "[0.00, 1.50, ...]" -> comma-joined five bands, each a plain decimal
-cap 256 timeout --foreground 15 "$here/pbpctrl-locked.sh" -d "$addr" get eq || out=""
+cap 256 "$TIMEOUT" --foreground 15 "$PYTHON3" -I "$here/pbpctrl-locked.sh" -d "$addr" get eq || out=""
 eqv=$(line1 "$out" 96)
 case "$eqv" in
   \[*\])

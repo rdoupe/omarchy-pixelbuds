@@ -1,4 +1,4 @@
-#!/usr/bin/env python3
+#!/usr/bin/python3 -I
 """Race-free case-battery cache for the Pixel Buds widget.
 
     casecache.py put <pct>   store a 0-100 reading with the current time
