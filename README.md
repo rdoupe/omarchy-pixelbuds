@@ -95,8 +95,9 @@ runtime file: owner, type, and link-count are checked on the opened fd, never
 by stating a pathname and opening it later. Every helper is launched from a
 closed environment (`clearEnvironment` + `PATH=/usr/bin:/bin`) using trusted
 absolute identities (`/usr/bin/sh`, `/usr/bin/timeout`, `/usr/bin/gdbus`,
-`/usr/bin/python3 -I`); `pbpctrl` itself is resolved from `/usr/bin:/bin` and
-`execve`'d, never via ambient PATH. Connect/disconnect detection is
+`/usr/bin/python3 -I`); helper shebangs must be exactly `#!/usr/bin/python3 -I`
+(isolated — a plain `/usr/bin/python3` shebang is a regression). `pbpctrl`
+itself is resolved from `/usr/bin:/bin` and `execve`'d, never via ambient PATH. Connect/disconnect detection is
 event-driven: a `gdbus` signal subscription on `org.bluez` triggers a refresh
 the moment any device's `Connected` state flips, with a short follow-up pass
 once the buds' RFCOMM channel settles.
