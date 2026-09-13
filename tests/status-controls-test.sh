@@ -19,7 +19,7 @@ EOF
 cat >"$tmp/bin/pbpctrl" <<'EOF'
 #!/bin/sh
 if [ "$*" = "set anc --help" ]; then
-  if [ "${PBPCTRL_TEST_ADAPTIVE:-0}" = 1 ]; then
+  if [ -f "${XDG_RUNTIME_DIR:-}/adaptive" ]; then
     echo "possible values: off, active, aware, adaptive"
   else
     echo "possible values: off, active, aware"
@@ -52,7 +52,7 @@ OUT
   "get gestures") echo true ;;
   "get gesture-control") echo "left: anc, right: assistant" ;;
   "get anc-gesture-loop")
-    if [ "${PBPCTRL_TEST_ADAPTIVE:-0}" = 1 ]; then
+    if [ -f "${XDG_RUNTIME_DIR:-}/adaptive" ]; then
       echo "[active, aware, adaptive]"
     else
       echo "[active, aware]"
@@ -65,7 +65,9 @@ esac
 EOF
 
 chmod +x "$tmp/bin/bluetoothctl" "$tmp/bin/pbpctrl"
-export PATH="$tmp/bin:$PATH"
+# Stubs are selected by the trusted-dir allowlist, never ambient PATH.
+export PIXELBUDS_TRUSTED_PATH="$tmp/bin"
+export PATH="/usr/bin:/bin"
 export XDG_RUNTIME_DIR="$tmp/runtime"
 export XDG_STATE_HOME="$tmp/state"
 
@@ -76,7 +78,7 @@ assert_line() {
   }
 }
 
-legacy=$(PBPCTRL_TEST_ADAPTIVE=0 "$repo/status.sh" --controls)
+legacy=$("$repo/status.sh" --controls)
 assert_line "$legacy" "connected=1"
 assert_line "$legacy" "adaptive_supported=0"
 assert_line "$legacy" "anc=active"
@@ -87,7 +89,8 @@ assert_line "$legacy" "ctl_anc_gesture_loop=active,aware"
 assert_line "$legacy" "ctl_balance=20"
 assert_line "$legacy" "ctl_eq=0.00,1.50,-2.00,0.50,3.00"
 
-adaptive=$(PBPCTRL_TEST_ADAPTIVE=1 "$repo/status.sh" --controls)
+: >"$tmp/runtime/adaptive"
+adaptive=$("$repo/status.sh" --controls)
 assert_line "$adaptive" "adaptive_supported=1"
 assert_line "$adaptive" "ctl_anc_gesture_loop=active,aware,adaptive"
 

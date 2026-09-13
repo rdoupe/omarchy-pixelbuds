@@ -26,6 +26,17 @@ Panel {
 
   readonly property string scriptPath: String(Qt.resolvedUrl("status.sh")).replace(/^file:\/\//, "")
   readonly property string pbpctrlPath: String(Qt.resolvedUrl("pbpctrl-locked.sh")).replace(/^file:\/\//, "")
+  // Distro identities. Never ambient PATH: a shadowed sh/timeout/gdbus/python3
+  // would run before status.sh could enforce its own allowlist.
+  readonly property string shBin: "/usr/bin/sh"
+  readonly property string timeoutBin: "/usr/bin/timeout"
+  readonly property string gdbusBin: "/usr/bin/gdbus"
+  readonly property string python3Bin: "/usr/bin/python3"
+  readonly property string wlCopyBin: "/usr/bin/wl-copy"
+  readonly property string omarchyShellBin: "/usr/bin/omarchy-shell"
+  readonly property string trustedPath: "/usr/bin:/bin"
+  readonly property int statusStdoutCeiling: 16384
+  readonly property int controlsStdoutCeiling: 8192
   readonly property int pollInterval: Math.max(5, parseInt(setting("pollIntervalSec", 30)) || 30) * 1000
   readonly property bool hideWhenDisconnected: String(setting("hideWhenDisconnected", true)) === "true"
   readonly property color urgentColor: bar ? bar.urgent : Color.urgent
@@ -82,6 +93,31 @@ Panel {
   property var opQueue: []
   property bool opRunning: false
 
+  // Allowlist only. clearEnvironment drops PYTHON*, LD_*, and ambient PATH
+  // before /usr/bin/sh or /usr/bin/python3 starts. PATH is fixed for
+  // descendant resolvers. Test-only extra trusted dirs are not forwarded.
+  function launchEnvironment() {
+    var env = {
+      PATH: root.trustedPath,
+      HOME: Quickshell.env("HOME") || "",
+      LANG: Quickshell.env("LANG") || "C.UTF-8"
+    }
+    var pass = [
+      "USER", "LOGNAME",
+      "XDG_RUNTIME_DIR", "XDG_STATE_HOME", "XDG_SESSION_TYPE", "XDG_SESSION_ID",
+      "WAYLAND_DISPLAY", "DISPLAY",
+      "HYPRLAND_INSTANCE_SIGNATURE", "OMARCHY_PATH",
+      "DBUS_SYSTEM_BUS_ADDRESS", "DBUS_SESSION_BUS_ADDRESS",
+      "LC_ALL", "LC_CTYPE"
+    ]
+    for (var i = 0; i < pass.length; i++) {
+      var value = Quickshell.env(pass[i])
+      if (value !== undefined && value !== null && String(value) !== "")
+        env[pass[i]] = String(value)
+    }
+    return env
+  }
+
   function enqueue(op) {
     var i
     if (typeof op === "string") {
@@ -113,20 +149,25 @@ Panel {
     if (op !== "status" && op !== "controls" && !addrValid) { Qt.callLater(root.pump); return }
     opRunning = true
     var addr = String(status.addr || "")
+    var env = root.launchEnvironment()
     if (op === "status") {
       statusProc.gen = opGen
+      statusProc.environment = env
       statusProc.running = true
     } else if (op === "controls") {
       controlsProc.gen = opGen
+      controlsProc.environment = env
       controlsProc.running = true
     } else if (op[0] === "set") {
       ctlProc.gen = opGen
-      ctlProc.command = ["timeout", "15", root.pbpctrlPath, "-d", addr,
+      ctlProc.environment = env
+      ctlProc.command = [root.timeoutBin, "15", root.python3Bin, "-I", root.pbpctrlPath, "-d", addr,
         "set", op[1], "--"].concat(String(op[2]).split(" "))
       ctlProc.running = true
     } else {
       actionProc.gen = opGen
-      actionProc.command = ["timeout", "15", root.pbpctrlPath, "-d", addr, "set", "anc", op[1]]
+      actionProc.environment = env
+      actionProc.command = [root.timeoutBin, "15", root.python3Bin, "-I", root.pbpctrlPath, "-d", addr, "set", "anc", op[1]]
       actionProc.running = true
     }
   }
@@ -156,7 +197,7 @@ Panel {
   }
 
   function applyControls(raw) {
-    var next = Model.parseStatus(raw)
+    var next = Model.parseStatus(Model.clip(raw, root.controlsStdoutCeiling))
     var out = {}
     for (var k in next) if (k.indexOf("ctl_") === 0) out[k] = next[k]
     controls = out
@@ -179,7 +220,7 @@ Panel {
   }
 
   function applyStatus(raw) {
-    var next = Model.parseStatus(raw)
+    var next = Model.parseStatus(Model.clip(raw, root.statusStdoutCeiling))
     if (Object.keys(next).length === 0) return
     status = next
     everLoaded = true
@@ -194,7 +235,10 @@ Panel {
   // their own terminal.
   property bool installCmdCopied: false
   function copyInstallCommand() {
-    Quickshell.execDetached(["wl-copy", "omarchy pkg aur add pbpctrl"])
+    copyProc.environment = root.launchEnvironment()
+    copyProc.command = [root.wlCopyBin, "omarchy pkg aur add pbpctrl"]
+    copyProc.running = false
+    copyProc.running = true
     installCmdCopied = true
     copiedReset.restart()
   }
@@ -261,10 +305,13 @@ Panel {
 
   function showVolumeOsd(percent) {
     if (!connected || percent < 0 || percent > 100) return
-    Quickshell.execDetached(["omarchy-shell", "osd", "show", JSON.stringify({
+    osdProc.environment = root.launchEnvironment()
+    osdProc.command = [root.omarchyShellBin, "osd", "show", JSON.stringify({
       icon: volumeIcon(percent),
       value: percent
-    })])
+    })]
+    osdProc.running = false
+    osdProc.running = true
   }
 
   function observeBudsVolume() {
@@ -317,7 +364,9 @@ Panel {
   Process {
     id: statusProc
     property int gen: 0
-    command: ["sh", root.scriptPath]
+    command: [root.shBin, root.scriptPath]
+    clearEnvironment: true
+    environment: ({})
     stdout: StdioCollector {
       waitForEnd: true
       onStreamFinished: if (statusProc.gen === root.opGen) root.applyStatus(text)
@@ -328,6 +377,8 @@ Panel {
   Process {
     id: actionProc
     property int gen: 0
+    clearEnvironment: true
+    environment: ({})
     onExited: function(code) {
       if (code !== 0) root.pendingAnc = ""
       root.opDone(actionProc.gen)
@@ -337,7 +388,9 @@ Panel {
   Process {
     id: controlsProc
     property int gen: 0
-    command: ["sh", root.scriptPath, "--controls"]
+    command: [root.shBin, root.scriptPath, "--controls"]
+    clearEnvironment: true
+    environment: ({})
     stdout: StdioCollector {
       waitForEnd: true
       onStreamFinished: if (controlsProc.gen === root.opGen) root.applyControls(text)
@@ -348,7 +401,21 @@ Panel {
   Process {
     id: ctlProc
     property int gen: 0
+    clearEnvironment: true
+    environment: ({})
     onExited: root.opDone(ctlProc.gen)
+  }
+
+  Process {
+    id: copyProc
+    clearEnvironment: true
+    environment: ({})
+  }
+
+  Process {
+    id: osdProc
+    clearEnvironment: true
+    environment: ({})
   }
 
   // Connect/disconnect is event-driven: a plain signal subscription on the
@@ -357,8 +424,10 @@ Panel {
   // cheap bluetoothctl call when it isn't the buds.
   Process {
     id: bluezMonitor
-    command: ["gdbus", "monitor", "--system", "--dest", "org.bluez"]
-    running: true
+    command: [root.gdbusBin, "monitor", "--system", "--dest", "org.bluez"]
+    clearEnvironment: true
+    environment: ({})
+    running: false
     stdout: SplitParser {
       onRead: function(line) {
         if (line.length > 4096) return
@@ -382,7 +451,10 @@ Panel {
   Timer {
     id: monitorRestart
     interval: 3000
-    onTriggered: bluezMonitor.running = true
+    onTriggered: {
+      bluezMonitor.environment = root.launchEnvironment()
+      bluezMonitor.running = true
+    }
   }
   property bool disconnectEvent: false
   Timer {
@@ -411,7 +483,18 @@ Panel {
     onTriggered: root.refresh()
   }
 
-  Component.onCompleted: refresh()
+  Component.onCompleted: {
+    var env = root.launchEnvironment()
+    statusProc.environment = env
+    controlsProc.environment = env
+    actionProc.environment = env
+    ctlProc.environment = env
+    copyProc.environment = env
+    osdProc.environment = env
+    bluezMonitor.environment = env
+    bluezMonitor.running = true
+    refresh()
+  }
 
   PwObjectTracker { objects: root.audioSink ? [root.audioSink] : [] }
 

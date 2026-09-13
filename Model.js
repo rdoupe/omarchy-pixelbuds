@@ -1,5 +1,15 @@
 .pragma library
 
+// Second ceiling after status.sh producer-side cap(). Collectors have no
+// QML maxBytes; clip before parse so a future uncapped producer cannot
+// assign an arbitrary string into the long-lived shell.
+function clip(raw, max) {
+  var s = String(raw || "")
+  var n = parseInt(max)
+  if (!(n > 0) || s.length <= n) return s
+  return s.substring(0, n)
+}
+
 // Parses status.sh output ("key=value" per line) into an object.
 function parseStatus(raw) {
   var out = {}

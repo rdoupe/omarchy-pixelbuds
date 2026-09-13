@@ -14,7 +14,8 @@ exit 0
 EOF
 chmod +x "$tmp/bin/pbpctrl"
 
-export PATH="$tmp/bin:$PATH"
+export PIXELBUDS_TRUSTED_PATH="$tmp/bin"
+export PATH="/usr/bin:/bin"
 export XDG_RUNTIME_DIR="$tmp/runtime"
 
 fail() {
@@ -35,6 +36,14 @@ fi
 if grep -E 'exec 9<>|: >"\$lock_file"|verify_regular_file' "$helper" >/dev/null; then
   fail "lock helper still checks a pathname and later opens it"
 fi
+if grep -q 'os.execvp' "$helper"; then
+  fail "lock helper still looks up pbpctrl on ambient PATH"
+fi
+grep -q 'os.execve' "$helper" || fail "lock helper must execve a trusted absolute pbpctrl"
+case "$(head -n1 "$helper")" in
+  "#!/usr/bin/python3 -I") ;;
+  *) fail "lock helper shebang must be isolated /usr/bin/python3 -I" ;;
+esac
 
 # Happy path: create the private dir + lock via descriptor-safe open.
 "$helper" get anc >/dev/null
