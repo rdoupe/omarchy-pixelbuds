@@ -49,6 +49,7 @@ grep -q 'Model.clip(raw, root.statusStdoutCeiling)' "$qml" || fail "applyStatus 
 grep -q 'Model.clip(raw, root.controlsStdoutCeiling)' "$qml" || fail "applyControls must clip collector text"
 
 # --- Shebangs / exec identity ---
+# Isolated interpreter only. A plain /usr/bin/python3 shebang is a regression.
 case "$(head -n1 "$helper")" in
   "#!/usr/bin/python3 -I") ;;
   *) fail "pbpctrl-locked.sh shebang must be isolated /usr/bin/python3 -I" ;;
