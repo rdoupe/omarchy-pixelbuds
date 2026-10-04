@@ -1,26 +1,20 @@
-# SPDX-License-Identifier: Apache-2.0
+# SPDX-License-Identifier: MIT
 #
 # Maestro protocol codec for Google Pixel Buds (HDLC framing, pw_rpc packets,
 # protobuf field codec, Maestro settings).
 #
 # This file is a Python port of parts of qzed/pbpctrl's `libmaestro` crate
 # (https://github.com/qzed/pbpctrl), Copyright (c) 2022 Maximilian Luz,
-# licensed under the Apache License, Version 2.0 (dual-licensed MIT/Apache-2.0
-# upstream; used here under Apache-2.0). Ported: HDLC frame encoding/decoding
-# and the 65599 id hash (src/hdlc, src/pwrpc/id.rs), the Maestro peer/channel
-# address map (src/protocol/addr.rs), the pw_rpc packet layout
-# (proto/pw.rpc.packet.proto, itself from the Pigweed project, Copyright 2020
-# The Pigweed Authors, Apache-2.0), the Maestro message field numbers
+# dual-licensed MIT OR Apache-2.0 upstream and used here under the MIT
+# License. Ported: HDLC frame encoding/decoding and the 65599 id hash
+# (src/hdlc, src/pwrpc/id.rs), the Maestro peer/channel address map
+# (src/protocol/addr.rs), the Maestro message field numbers
 # (proto/maestro_pw.proto) and the setting conversions
-# (src/service/settings.rs). Changes: rewritten in Python, every decoder made
-# byte-bounded and strict for untrusted device input, blocking RPC client
-# written for this project. See NOTICE for the full attribution.
-#
-# You may obtain a copy of the License at
-#     https://www.apache.org/licenses/LICENSE-2.0
-# Unless required by applicable law or agreed to in writing, software
-# distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
-# WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# (src/service/settings.rs). The pw_rpc packet field numbers follow the wire
+# format defined by the Pigweed project (pw_rpc); no Pigweed code is
+# included. Changes: rewritten in Python, every decoder made byte-bounded and
+# strict for untrusted device input, blocking RPC client written for this
+# project. See NOTICE for the full attribution.
 """Pure, I/O-free Maestro protocol pieces plus a transport-agnostic RPC client.
 
 Everything that parses bytes received from the buds treats them as hostile:

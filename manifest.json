@@ -4,7 +4,7 @@
   "name": "Pixel Buds",
   "version": "2.0.0",
   "author": "Ryan Doupe",
-  "license": "MIT AND Apache-2.0",
+  "license": "MIT",
   "description": "Pixel Buds Pro in the Omarchy bar: battery per bud and case, listening modes, shared volume with swipe OSD, touch gestures, and device + sound controls (multipoint, speech detection, EQ, balance). Event-driven: the icon appears the moment your buds connect. Omarchy-native: a bundled Python bridge talks to the buds directly, so nothing else needs installing.",
   "kinds": [
     "service",
