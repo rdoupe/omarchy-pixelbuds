@@ -182,12 +182,13 @@ trip that restores the original mode.
 ## Credits
 
 The Maestro protocol layer in `bridge/maestro.py` is ported from
-[pbpctrl](https://github.com/qzed/pbpctrl) by Maximilian Luz (Apache-2.0); see
+[pbpctrl](https://github.com/qzed/pbpctrl) by Maximilian Luz (used under its MIT option); see
 [NOTICE](NOTICE). [pixelbuds-plugin-kde](https://github.com/thek0d3r/pixelbuds-plugin-kde)
 served as an independent cross-check of the protocol; no code was taken from
 it.
 
 ## License
 
-[MIT](LICENSE), except `bridge/maestro.py` and the test vectors derived from
-pbpctrl, which are [Apache-2.0](LICENSE-APACHE); see [NOTICE](NOTICE).
+[MIT](LICENSE). `bridge/maestro.py` and the test vectors marked "(pbpctrl)"
+are derived from pbpctrl, Copyright (c) 2022 Maximilian Luz, used under its MIT
+option; see [NOTICE](NOTICE).

@@ -1,5 +1,5 @@
 """Protocol codec tests. Vectors marked (pbpctrl) are copied from the unit
-tests in qzed/pbpctrl's libmaestro (Apache-2.0)."""
+tests in qzed/pbpctrl's libmaestro (MIT OR Apache-2.0, used here under MIT)."""
 import os
 import random
 import struct
