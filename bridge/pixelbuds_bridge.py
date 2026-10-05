@@ -9,8 +9,11 @@ connected Pixel Buds for as long as they stay connected.
 Lifecycle
   1. Find a connected BlueZ device that advertises the Maestro service UUID
      (never by name: a renamed pair must still be found). None -> "absent".
-  2. Refuse to touch a device that is not both Connected and ServicesResolved:
-     a device that is going away must never be pulled back by us.
+  2. Refuse to touch a device that drops Connected. ServicesResolved going
+     false is the usual first sign that a device is leaving, so wait briefly
+     and abort if Connected follows. Some Pixel Buds Pro 2 stay Connected
+     with ServicesResolved false while they are already the audio device and
+     the Maestro UUID is cached; those are connected, not left alone.
   3. Take the per-user runtime lock (one Maestro session per user, ever).
   4. Register a client-role BlueZ Profile1 for the Maestro UUID and ask BlueZ
      to ConnectProfile; BlueZ performs SDP and hands us the RFCOMM socket.
@@ -75,6 +78,10 @@ PIXEL_BUDS_PRO2_CLASS = 0x244404   # pbpctrl cli/src/bt.rs PIXEL_BUDS2_CLASS
 RPC_TIMEOUT = 3.0
 CONNECT_TIMEOUT = 12.0
 CONNECT_TRIES = 3
+# How long an unresolved-but-connected device may stay that way before we
+# treat it as usable. A device that is actually leaving flips Connected
+# inside this window; ConnectProfile is not called until the window passes.
+UNRESOLVED_SETTLE = 1.0
 LOCK_WAIT = 8.0
 RUNTIME_STALE = 20.0        # refresh re-subscribes runtime info when older
 CASE_WRITE_INTERVAL = 300.0
@@ -993,6 +1000,25 @@ class CaseCache:
 # Main
 # --------------------------------------------------------------------------
 
+def confirm_still_connected(bluez, device, hub):
+    """An unresolved device may be leaving, or it may be a Pixel Buds Pro 2
+    that BlueZ never marks ServicesResolved while it is the active sink.
+    Wait UNRESOLVED_SETTLE. Connected dropping means leave it alone.
+    Staying connected means the Maestro UUID we already matched is enough."""
+    deadline = time.monotonic() + UNRESOLVED_SETTLE
+    while time.monotonic() < deadline:
+        hub.sleep(0.2)
+        try:
+            connected, resolved = bluez.device_state(device.path)
+        except Exception:
+            raise Stop("disconnected")
+        if not connected:
+            raise Stop("disconnected")
+        if resolved:
+            device.resolved = True
+            return
+
+
 def connect(bluez, device, link, hub):
     """Open the Maestro RFCOMM socket through BlueZ. Re-verifies the link
     before every attempt so a leaving device is never reconnected."""
@@ -1000,13 +1026,13 @@ def connect(bluez, device, link, hub):
     for attempt in range(CONNECT_TRIES):
         hub.check()
         try:
-            connected, resolved = bluez.device_state(device.path)
+            connected, _resolved = bluez.device_state(device.path)
         except Exception:
             raise Stop("disconnected")        # the device object is gone
         if not connected:
             raise Stop("disconnected")
-        if not resolved:
-            raise Stop("not_ready")
+        # ServicesResolved may stay false on a device that is in use.
+        # Connected is the check that keeps a leaving device untouched.
         with link.lock:
             link.connect_error = None
         bluez.connect_profile()
@@ -1066,7 +1092,7 @@ def main(argv=None, make_bluez=BluezGio, stdin_fd=0, stdout=None):
         if device is None:
             raise Stop("absent")
         if not device.resolved:
-            raise Stop("not_ready")
+            confirm_still_connected(bluez, device, hub)
         session = Session(emitter, hub, device)
         emitter.emit({"type": "state", "status": {
             "connected": "1", "addr": device.addr, "name": device.name,

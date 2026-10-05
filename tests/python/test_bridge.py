@@ -393,11 +393,18 @@ class MainLifecycle(EnvCase):
         self.assertEqual([e["type"] for e in out.events()], ["hello", "bye"])
         self.assertEqual(out.events()[-1]["reason"], "absent")
 
-    def test_not_resolved_is_never_connected(self):
+    def test_unresolved_device_that_drops_is_not_connected(self):
         fake = FakeBluez(resolved=False)
-        code, out = self.run_main(fake, close_after=1.0)
-        self.assertEqual(out.events()[-1]["reason"], "not_ready")
+        later(0.3, lambda: setattr(fake, "connected", False))
+        _code, out = self.run_main(fake, close_after=2.0)
+        self.assertEqual(out.events()[-1]["reason"], "disconnected")
         self.assertEqual(fake.connect_calls, 0)
+
+    def test_unresolved_stable_device_is_connected(self):
+        fake = FakeBluez(resolved=False)
+        _code, out = self.run_main(fake, close_after=2.5)
+        self.assertGreater(fake.connect_calls, 0)
+        self.assertNotIn("not_ready", [e.get("reason") for e in out.events() if e["type"] == "bye"])
 
     def test_going_away_device_is_never_reconnected(self):
         fake = FakeBluez()
