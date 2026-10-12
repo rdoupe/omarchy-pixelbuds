@@ -6,6 +6,14 @@ there is nothing else to install or build.
 
 ![screenshot](preview.png)
 
+## What's new in 2.0.1
+
+- **Buds that were already connected now show up.** Some Pixel Buds Pro 2
+  stay connected without BlueZ ever marking their services ready, and 2.0
+  waited for them forever. The icon now appears at shell start and on
+  connect for those pairs too.
+- **MIT licence only**, taking pbpctrl's MIT option for the protocol port.
+
 ## What's new in 2.0
 
 2.0 rewrites how the plugin talks to the buds. Earlier versions drove the
