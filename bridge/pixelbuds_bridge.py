@@ -997,9 +997,31 @@ class CaseCache:
     """The case reports only through a docked bud, so remember the last
     reading (as Android does) through the descriptor-safe casecache helper."""
 
-    def __init__(self, wall=time.time):
-        self.wall = wall
-        self.last_put = None
+    def __init__(self, wall=time.time, clock=time.monotonic):
+        self.wall = wall            # timestamps stored in the cache file
+        self.clock = clock          # write spacing; immune to wall-clock jumps
+        self.last_put = None        # (pct, clock) of the last write
+        self.pending = None         # a changed level not yet written
+
+    def _put(self, dfd, pct):
+        casecache.put(dfd, pct)
+        self.last_put = (pct, self.clock())
+        self.pending = None
+
+    def flush(self):
+        """Write a level that changed inside the spacing window (session end)."""
+        if self.pending is None:
+            return
+        try:
+            dfd = casecache.open_dir()
+        except OSError:
+            return
+        try:
+            self._put(dfd, self.pending)
+        except OSError:
+            pass
+        finally:
+            os.close(dfd)
 
     def update(self, case_pct):
         out = {}
@@ -1009,13 +1031,18 @@ class CaseCache:
             return out
         try:
             if 0 <= case_pct <= 100:
-                now = self.wall()
+                now = self.clock()
                 age = None if self.last_put is None else now - self.last_put[1]
                 changed = self.last_put is not None and self.last_put[0] != case_pct
                 if age is None or age > CASE_WRITE_INTERVAL or (changed and age >= CASE_MIN_WRITE):
-                    casecache.put(dfd, case_pct)
-                    self.last_put = (case_pct, now)
+                    self._put(dfd, case_pct)
+                elif changed:
+                    self.pending = case_pct
+                else:
+                    self.pending = None
             else:
+                if self.pending is not None:     # the case went quiet: keep its last level
+                    self._put(dfd, self.pending)
                 got = casecache.get(dfd)
                 if got is not None:
                     pct, ts = got
@@ -1113,6 +1140,7 @@ def main(argv=None, make_bluez=BluezGio, stdin_fd=0, stdout=None):
     bluez = None
     lock_fd = None
     sock = None
+    session = None
     reason, detail = "error", ""
     emitter.emit({"type": "hello", "v": PROTOCOL_VERSION})
     try:
@@ -1155,6 +1183,8 @@ def main(argv=None, make_bluez=BluezGio, stdin_fd=0, stdout=None):
     except Exception:
         reason, detail = "error", "internal error"
     finally:
+        if session is not None:
+            session.cache.flush()
         if sock is not None:
             try:
                 sock.shutdown(socket.SHUT_RDWR)

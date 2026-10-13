@@ -53,6 +53,7 @@ Item {
   property int _ancRequest: 0          // id of the latest set_anc / cycle_anc
   property string _budsAddr: ""        // last buds address a session reported
   property double _lastEventLaunch: 0
+  property bool _pendingStart: false   // a BlueZ event arrived while a bridge was running or stopping
   property int _osdValue: -1
   property double _lastRefresh: 0
 
@@ -115,6 +116,12 @@ Item {
     ready = false
     readingControls = false
     pendingAnc = ""
+    if (_pendingStart) {
+      // Buds that came back while the old session was still shutting down
+      // must not wait for another BlueZ event.
+      _pendingStart = false
+      if (!eventDebounce.running) eventDebounce.start()
+    }
     if (stopped) return
     var reason = _byeReason !== "" ? _byeReason : (code === 0 ? "stdin_closed" : "crashed")
     if (Model.retryable(reason) && connected) {
@@ -166,9 +173,9 @@ Item {
         _failures = 0
         return true
       case "result":
-        // Only the reply to the latest mode request may clear its pending
-        // mode; an older request finishing late must not.
-        if ((ev.cmd === "set_anc" || ev.cmd === "cycle_anc") && ev.id === _ancRequest && ev.ok !== true)
+        // The reply to the latest mode request settles it (its state event,
+        // if any, came first); an older request finishing late must not.
+        if ((ev.cmd === "set_anc" || ev.cmd === "cycle_anc") && ev.id === _ancRequest)
           pendingAnc = ""
         if (ev.cmd === "controls") readingControls = false
         return true
@@ -317,7 +324,15 @@ Item {
       })]
       root._osdValue = -1
       osdProc.running = true
+      osdKill.restart()
     }
+  }
+
+  // The OSD helper is a one-shot command; never let a hung one block the next.
+  Timer {
+    id: osdKill
+    interval: 2000
+    onTriggered: if (osdProc.running) osdProc.signal(9)
   }
 
   Process {
@@ -345,7 +360,7 @@ Item {
       var wait = root._lastEventLaunch + 3000 - Date.now()
       if (wait > 0) { interval = wait; start(); return }
       interval = 400
-      if (bridge.running) return
+      if (bridge.running || root._stopping) { root._pendingStart = true; return }
       root._lastEventLaunch = Date.now()
       root.ensureBridge()
     }

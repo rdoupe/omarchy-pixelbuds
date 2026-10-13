@@ -604,7 +604,7 @@ class CaseCacheTests(EnvCase):
 
     def test_changed_case_level_writes_are_spaced(self):
         now = [1000.0]
-        cache = bridge.CaseCache(wall=lambda: now[0])
+        cache = bridge.CaseCache(clock=lambda: now[0])
         leaf = os.path.join(self.state, "omarchy-pixelbuds", "case")
         cache.update(50)
         first = os.stat(leaf).st_mtime_ns
@@ -616,6 +616,45 @@ class CaseCacheTests(EnvCase):
         cache.update(60)
         with open(leaf) as f:
             self.assertEqual(f.read().split()[0], "60")
+
+    def _level(self):
+        with open(os.path.join(self.state, "omarchy-pixelbuds", "case")) as f:
+            return int(f.read().split()[0])
+
+    def test_spacing_ignores_wall_clock_jumps(self):
+        now = [1000.0]
+        cache = bridge.CaseCache(clock=lambda: now[0], wall=lambda: time.time() - 86400 * 365)
+        cache.update(40)
+        now[0] += bridge.CASE_MIN_WRITE + 1     # monotonic time moves on, wall clock went back
+        cache.update(41)
+        self.assertEqual(self._level(), 41)
+
+    def test_last_change_is_kept_when_the_case_goes_quiet(self):
+        now = [1000.0]
+        cache = bridge.CaseCache(clock=lambda: now[0])
+        cache.update(70)
+        now[0] += 5
+        cache.update(69)                        # inside the spacing window: held back
+        self.assertEqual(self._level(), 70)
+        now[0] += 1
+        self.assertEqual(cache.update(-1)["case_last"], 69)   # case went quiet: written then
+
+    def test_flush_writes_the_held_back_level(self):
+        now = [1000.0]
+        cache = bridge.CaseCache(clock=lambda: now[0])
+        cache.update(30)
+        now[0] += 5
+        cache.update(31)
+        cache.flush()                            # session end
+        self.assertEqual(self._level(), 31)
+
+    def test_failed_write_leaves_no_temp_file(self):
+        import unittest.mock
+        cache = bridge.CaseCache()
+        with unittest.mock.patch.object(bridge.casecache.os, "fsync", side_effect=OSError(28, "No space left")):
+            cache.update(55)
+        left = [n for n in os.listdir(os.path.join(self.state, "omarchy-pixelbuds")) if n.startswith(".case.")]
+        self.assertEqual(left, [])
 
 
 if __name__ == "__main__":

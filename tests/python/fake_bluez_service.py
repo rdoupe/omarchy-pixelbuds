@@ -11,6 +11,7 @@ Test hooks on the device object (interface test.Control):
   Disconnect()            emit Connected=false like a user disconnect
   Connect()               emit Connected=true like a (re)connect
   SetAlias(s)             emit an Alias change, as any local user can cause
+  SetUnregisterDelay(u)   answer UnregisterProfile after u ms (slow shutdown)
   RequestDisconnection()  call the profile's RequestDisconnection
 """
 import os
@@ -50,13 +51,15 @@ XML = """
     <method name="Disconnect"/>
     <method name="Connect"/>
     <method name="SetAlias"><arg type="s" direction="in"/></method>
+    <method name="SetUnregisterDelay"><arg type="u" direction="in"/></method>
     <method name="RequestDisconnection"/>
     <method name="Stats"><arg type="a{si}" direction="out"/></method>
   </interface>
 </node>
 """
 
-state = {"connected": True, "resolved": True, "profile": None, "connects": 0, "buds": None}
+state = {"connected": True, "resolved": True, "profile": None, "connects": 0, "buds": None,
+         "unregister_delay": 0}
 
 
 def adapter_props():
@@ -110,6 +113,12 @@ def main():
             inv.return_value(None)
         elif method == "UnregisterProfile":
             state["profile"] = None
+            if state["unregister_delay"]:
+                GLib.timeout_add(state["unregister_delay"], lambda: inv.return_value(None) or False)
+            else:
+                inv.return_value(None)
+        elif method == "SetUnregisterDelay":
+            (state["unregister_delay"],) = params.unpack()
             inv.return_value(None)
         elif method == "GetAll":
             (iface,) = params.unpack()

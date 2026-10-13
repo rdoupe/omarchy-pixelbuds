@@ -113,8 +113,11 @@ def put(dfd, pct):
     try:
         os.write(fd, ("%d %d\n" % (pct, int(time.time()))).encode("ascii"))
         os.fsync(fd)
-    finally:
+    except OSError:
         os.close(fd)
+        os.unlink(tmp, dir_fd=dfd)       # e.g. disk full: leave nothing behind
+        raise
+    os.close(fd)
     try:
         # rename replaces the leaf atomically and never follows a symlink there.
         os.rename(tmp, NAME, src_dir_fd=dfd, dst_dir_fd=dfd)

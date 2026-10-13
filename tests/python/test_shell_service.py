@@ -32,7 +32,7 @@ except ImportError:
 
 @unittest.skipUnless(os.access(QUICKSHELL, os.X_OK), "needs quickshell")
 class ServiceInHeadlessShell(PrivateBusCase):
-    def start_shell(self):
+    def start_shell(self, extra_env=None):
         for d in ("cfg", "cache", "data"):
             os.makedirs(os.path.join(self.tmp, d), exist_ok=True)
         env = dict(self.env)
@@ -46,6 +46,7 @@ class ServiceInHeadlessShell(PrivateBusCase):
             "PIXELBUDS_TEST_SERVICE": "file://" + os.path.join(REPO, "Service.qml"),
             "NO_COLOR": "1",
         })
+        env.update(extra_env or {})
         for name in ("WAYLAND_DISPLAY", "DISPLAY", "HYPRLAND_INSTANCE_SIGNATURE"):
             env.pop(name, None)
         proc = subprocess.Popen([QUICKSHELL, "--no-color", "-p", HARNESS], stdin=subprocess.DEVNULL,
@@ -114,6 +115,24 @@ class ServiceInHeadlessShell(PrivateBusCase):
         connects = self.control("Stats", "(a{si})")["connects"]
         self.assertLessEqual(connects, 4, "bridge connected %d times in 7 s of flapping" % connects)
         self.wait_state(proc, {"connected": True, "ready": True}, timeout=8.0)   # still recovers
+
+    def test_reconnect_during_slow_shutdown_is_not_lost(self):
+        # BlueZ answers UnregisterProfile slowly, so the old session is still
+        # stopping when the buds come back; that connect must not be dropped.
+        proc = self.start_shell()
+        self.wait_state(proc, {"connected": True, "ready": True})
+        self.control_args("SetUnregisterDelay", GLib.Variant("(u)", (900,)))
+        self.control("Disconnect")
+        time.sleep(0.1)
+        self.control("Connect")
+        self.wait_state(proc, {"connected": True, "ready": True}, timeout=10.0)
+
+    def test_choosing_the_current_mode_settles(self):
+        # The buds already report "active"; asking for it again changes
+        # nothing, so no state event follows, only the command's result.
+        proc = self.start_shell({"PIXELBUDS_TEST_SET_ANC": "active"})
+        self.wait_state(proc, {"ancSent": True})
+        self.wait_state(proc, {"ancSent": True, "pendingAnc": "", "ready": True}, timeout=5.0)
 
 
 if __name__ == "__main__":
