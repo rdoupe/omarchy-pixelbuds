@@ -40,8 +40,6 @@ Panel {
   readonly property string pendingAnc: svc ? svc.pendingAnc : ""
 
   // Distro identity for the OSD helper. Never ambient PATH.
-  readonly property string omarchyShellBin: "/usr/bin/omarchy-shell"
-  readonly property string trustedPath: "/usr/bin:/bin"
   readonly property int pollInterval: Math.max(5, parseInt(setting("pollIntervalSec", 30)) || 30) * 1000
   readonly property bool hideWhenDisconnected: String(setting("hideWhenDisconnected", true)) === "true"
   readonly property color urgentColor: bar ? bar.urgent : Color.urgent
@@ -87,30 +85,6 @@ Panel {
 
   readonly property color fg: bar ? bar.foreground : Color.foreground
   readonly property string fontFamily: bar ? bar.fontFamily : Style.font.family
-
-  // Allowlist only, for the OSD helper. clearEnvironment drops PYTHON*,
-  // LD_*, and ambient PATH; PATH is fixed for descendant resolvers.
-  function launchEnvironment() {
-    var env = {
-      PATH: root.trustedPath,
-      HOME: Quickshell.env("HOME") || "",
-      LANG: Quickshell.env("LANG") || "C.UTF-8"
-    }
-    var pass = [
-      "USER", "LOGNAME",
-      "XDG_RUNTIME_DIR", "XDG_STATE_HOME", "XDG_SESSION_TYPE", "XDG_SESSION_ID",
-      "WAYLAND_DISPLAY", "DISPLAY",
-      "HYPRLAND_INSTANCE_SIGNATURE", "OMARCHY_PATH",
-      "DBUS_SYSTEM_BUS_ADDRESS", "DBUS_SESSION_BUS_ADDRESS",
-      "LC_ALL", "LC_CTYPE"
-    ]
-    for (var i = 0; i < pass.length; i++) {
-      var value = Quickshell.env(pass[i])
-      if (value !== undefined && value !== null && String(value) !== "")
-        env[pass[i]] = String(value)
-    }
-    return env
-  }
 
   function refresh() { if (svc) svc.refresh() }
   function refreshControls() { if (svc && connected) svc.refreshControls() }
@@ -171,23 +145,6 @@ Panel {
     setControl("anc-gesture-loop", { modes: selected })
   }
 
-  function volumeIcon(percent) {
-    if (percent >= 67) return ""
-    if (percent >= 34) return ""
-    if (percent > 0) return ""
-    return ""
-  }
-
-  function showVolumeOsd(percent) {
-    if (!connected || percent < 0 || percent > 100) return
-    osdProc.environment = root.launchEnvironment()
-    osdProc.command = [root.omarchyShellBin, "osd", "show", JSON.stringify({
-      icon: volumeIcon(percent),
-      value: percent
-    })]
-    osdProc.running = false
-    osdProc.running = true
-  }
 
   function observeBudsVolume() {
     if (!budsAudioActive || budsVolumePct < 0) {
@@ -204,7 +161,7 @@ Panel {
     }
     if (budsVolumePct === lastBudsVolumePct) return
     lastBudsVolumePct = budsVolumePct
-    showVolumeOsd(budsVolumePct)
+    if (svc) svc.showVolumeOsd(budsVolumePct)   // one coalesced OSD for all bars
   }
 
   onBudsAudioActiveChanged: observeBudsVolume()
@@ -234,12 +191,6 @@ Panel {
     function setAnc(mode: string) { root.setAnc(mode) }
   }
 
-  Process {
-    id: osdProc
-    clearEnvironment: true
-    environment: ({})
-  }
-
   // Battery/ANC changes arrive as pushes from the buds; this slow poll is
   // only a fallback (faster while the panel is open). Disconnected idles at
   // zero cost — reconnects arrive via the service's BlueZ monitor.
@@ -250,7 +201,6 @@ Panel {
     onTriggered: root.refresh()
   }
 
-  Component.onCompleted: osdProc.environment = root.launchEnvironment()
 
   PwObjectTracker { objects: root.audioSink ? [root.audioSink] : [] }
 
@@ -467,7 +417,7 @@ Panel {
           Text {
             textFormat: Text.PlainText
             anchors.right: parent.right
-            text: root.budsVolumePct + "%  " + root.volumeIcon(root.budsVolumePct)
+            text: root.budsVolumePct + "%  " + Model.volumeIcon(root.budsVolumePct)
             color: root.fg
             font.family: root.fontFamily
             font.pixelSize: Style.font.bodySmall

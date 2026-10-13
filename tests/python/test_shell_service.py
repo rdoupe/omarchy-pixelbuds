@@ -99,6 +99,22 @@ class ServiceInHeadlessShell(PrivateBusCase):
         self.assertEqual(proc.poll(), None)
         self.assertEqual(self.control("Stats", "(a{si})")["connects"], 1)
 
+    def test_connect_storm_is_rate_limited(self):
+        # Another local UID may connect and disconnect the buds through
+        # BlueZ's default policy; the shell must not relaunch the bridge for
+        # every flap.
+        proc = self.start_shell()
+        self.wait_state(proc, {"connected": True, "ready": True})
+        # Flaps just slower than the 400 ms debounce, for about 7 s.
+        for _ in range(6):
+            self.control("Disconnect")
+            time.sleep(0.6)
+            self.control("Connect")
+            time.sleep(0.6)
+        connects = self.control("Stats", "(a{si})")["connects"]
+        self.assertLessEqual(connects, 4, "bridge connected %d times in 7 s of flapping" % connects)
+        self.wait_state(proc, {"connected": True, "ready": True}, timeout=8.0)   # still recovers
+
 
 if __name__ == "__main__":
     unittest.main()

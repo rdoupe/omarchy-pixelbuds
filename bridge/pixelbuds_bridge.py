@@ -85,6 +85,8 @@ UNRESOLVED_SETTLE = 1.0
 LOCK_WAIT = 8.0
 RUNTIME_STALE = 20.0        # refresh re-subscribes runtime info when older
 CASE_WRITE_INTERVAL = 300.0
+CASE_MIN_WRITE = 30.0       # a changed case level is written at most this often
+STREAM_EMIT_INTERVAL = 0.25 # device pushes reach the shell at most 4x per second
 
 ADDR_RE = re.compile(r"^([0-9A-F]{2}:){5}[0-9A-F]{2}$")
 ANC_MODES = ("off", "active", "aware", "adaptive")
@@ -632,6 +634,10 @@ class Session:
         self.loop_modes = None
         self.error = ""
         self.last_state = None
+        self.last_controls = None
+        self.stream_dirty = False
+        self.stream_controls = False
+        self.last_stream_emit = None
         self.queue = collections.deque()
 
     # ---- state ----
@@ -667,8 +673,33 @@ class Session:
             self.last_state = st
             self.emitter.emit({"type": "state", "status": st})
 
-    def emit_controls(self):
-        self.emitter.emit({"type": "controls", "controls": dict(self.controls)})
+    def emit_controls(self, force=False):
+        controls = dict(self.controls)
+        if force or controls != self.last_controls:
+            self.last_controls = controls
+            self.emitter.emit({"type": "controls", "controls": controls})
+
+    def stream_due(self):
+        """When the next coalesced device push may be sent, or None."""
+        if not self.stream_dirty:
+            return None
+        if self.last_stream_emit is None:
+            return self.clock()
+        return self.last_stream_emit + STREAM_EMIT_INTERVAL
+
+    def flush_stream(self):
+        """Device pushes are coalesced: whatever the buds (or anything that
+        advertises their service) send, the shell gets at most one state and
+        one controls line per STREAM_EMIT_INTERVAL, and only on change."""
+        due = self.stream_due()
+        if due is None or self.clock() < due:
+            return
+        self.last_stream_emit = self.clock()
+        if self.stream_controls:
+            self.emit_controls()
+        self.emit_state()
+        self.stream_dirty = False
+        self.stream_controls = False
 
     def apply_setting(self, name, value):
         """Store one decoded setting; returns which view changed."""
@@ -705,19 +736,18 @@ class Session:
             if method == maestro.M_SUB_RUNTIME_INFO:
                 self.runtime = maestro.decode_runtime_info(payload)
                 self.runtime_at = self.clock()
-                self.emit_state()
+                self.stream_dirty = True
             elif method == maestro.M_SUB_SETTINGS:
                 decoded = maestro.decode_setting_value(payload)
                 if decoded is None:
                     return
                 view = self.apply_setting(*decoded)
-                if view == "state":
-                    self.emit_state()
-                elif view == "controls":
-                    self.emit_controls()
-                    self.emit_state()       # adaptive gating may have changed
+                if view is not None:
+                    self.stream_dirty = True    # state: adaptive gating may change too
+                    self.stream_controls = self.stream_controls or view == "controls"
         except maestro.DecodeError:
             pass
+        self.flush_stream()
 
     # ---- device I/O ----
     def read_setting(self, sid):
@@ -790,6 +820,7 @@ class Session:
 
     def run(self):
         while True:
+            self.flush_stream()
             self.drain_stdin()
             if self.queue:
                 cmd = self.queue.popleft()
@@ -801,7 +832,8 @@ class Session:
                 except ValueError as error:
                     self.result(cmd, False, str(error))
                 continue
-            self.client.poll(self.clock() + 60.0)
+            due = self.stream_due()
+            self.client.poll(due if due is not None else self.clock() + 60.0)
 
     def execute(self, cmd):
         name = cmd["cmd"]
@@ -818,7 +850,7 @@ class Session:
                         maestro.S_GESTURES, maestro.S_GESTURE_CONTROL, maestro.S_ANC_GESTURE_LOOP,
                         maestro.S_BALANCE, maestro.S_EQ):
                 self.try_read(sid)
-            self.emit_controls()
+            self.emit_controls(force=True)
             self.emit_state()
         elif name == "set_anc":
             mode = cmd["mode"]
@@ -864,7 +896,7 @@ class Session:
                 self.write(maestro.sv_eq(cmd["bands"]))
             # Re-read so the panel shows the device's truth, not our request.
             self.try_read(sid)
-            self.emit_controls()
+            self.emit_controls(force=True)
             self.emit_state()
 
 
@@ -978,7 +1010,9 @@ class CaseCache:
         try:
             if 0 <= case_pct <= 100:
                 now = self.wall()
-                if self.last_put is None or self.last_put[0] != case_pct or now - self.last_put[1] > CASE_WRITE_INTERVAL:
+                age = None if self.last_put is None else now - self.last_put[1]
+                changed = self.last_put is not None and self.last_put[0] != case_pct
+                if age is None or age > CASE_WRITE_INTERVAL or (changed and age >= CASE_MIN_WRITE):
                     casecache.put(dfd, case_pct)
                     self.last_put = (case_pct, now)
             else:

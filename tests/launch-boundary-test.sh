@@ -29,7 +29,9 @@ if command -v git >/dev/null 2>&1 && git -C "$repo" rev-parse >/dev/null 2>&1; t
 fi
 
 # --- QML launch contract ---
-for f in "$panel" "$service"; do
+# Panel.qml launches nothing; every process lives in the single service.
+! grep -q 'Process {' "$panel" || fail "Panel.qml must not launch processes (one service per shell does)"
+for f in "$service"; do
   grep -q 'clearEnvironment: true' "$f" || fail "$f missing clearEnvironment"
   grep -q 'function launchEnvironment()' "$f" || fail "$f missing launchEnvironment"
   grep -q 'PATH: root.trustedPath' "$f" || fail "$f missing closed PATH"
@@ -49,8 +51,9 @@ grep -q 'readonly property string python3Bin: "/usr/bin/python3"' "$service" || 
 # service launches is the bridge, and it parses no BlueZ text output.
 grep -q '^import Quickshell.Bluetooth$' "$service" || fail "Service.qml must use Quickshell.Bluetooth for BlueZ events"
 ! grep -q 'gdbus' "$service" || fail "Service.qml must not read gdbus output"
-[ "$(grep -c '^  Process {' "$service")" -eq 1 ] || fail "Service.qml must launch only the bridge"
-grep -q 'readonly property string omarchyShellBin: "/usr/bin/omarchy-shell"' "$panel" || fail "Panel.qml missing /usr/bin/omarchy-shell"
+[ "$(grep -c '^  Process {' "$service")" -eq 2 ] || fail "Service.qml must launch only the bridge and the OSD helper"
+grep -q 'readonly property string omarchyShellBin: "/usr/bin/omarchy-shell"' "$service" || fail "Service.qml missing /usr/bin/omarchy-shell"
+grep -q 'osdProc.command = \[root.omarchyShellBin, "osd", "show"' "$service" || fail "OSD must be omarchy-shell osd show"
 grep -q 'command: \[root.python3Bin, "-I", "-B", root.bridgePath\]' "$service" || fail "bridge must be launched as python3 -I -B"
 grep -q 'splitMarker: ""' "$service" || fail "bridge stdout must be read as bounded chunks"
 grep -q 'Model.splitLines' "$service" || fail "bridge stdout must pass the line ceiling"

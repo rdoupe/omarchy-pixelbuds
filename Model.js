@@ -170,3 +170,10 @@ function batteryIcon(level, isCharging) {
   var icons = ["󰂎", "󰁺", "󰁻", "󰁼", "󰁽", "󰁾", "󰁿", "󰂀", "󰂁", "󰂂", "󰁹"]
   return icons[Math.max(0, Math.min(10, Math.round(level / 10)))]
 }
+
+function volumeIcon(percent) {
+  if (percent >= 67) return ""
+  if (percent >= 34) return ""
+  if (percent > 0) return ""
+  return ""
+}

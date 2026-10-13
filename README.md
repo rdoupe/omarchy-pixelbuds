@@ -11,6 +11,12 @@ there is nothing else to install or build.
 - **Native Bluetooth events.** Connects and disconnects now come from the
   shell's built-in Bluetooth client instead of a separate `gdbus monitor`
   process, so the plugin runs one process fewer and parses no BlueZ output.
+- **Bounded under load.** Updates pushed by the buds reach the bar at most
+  four times a second and only when something changed, the case level is
+  saved at most every 30 seconds, the volume OSD is shown once for all bars,
+  and a flapping Bluetooth connection restarts the bridge at most every 3 s.
+- **Listening-mode switches** no longer get cleared by the reply to an older
+  request when you switch twice quickly.
 
 ## What's new in 2.0.1
 

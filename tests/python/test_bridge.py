@@ -297,6 +297,40 @@ class SessionTests(EnvCase):
         self.assertGreaterEqual(st["case_last_age"], 0)
         self.assertEqual(r.last("controls")["controls"]["ctl_mono"], "true")
 
+    def test_device_flood_is_coalesced(self):
+        # Anything advertising the buds' service can push frames as fast as
+        # RFCOMM allows; the shell must still get a handful of lines.
+        r = self.rig
+        r.session.start()
+        before = len(r.out.events())
+
+        def flood():
+            for i in range(400):
+                r.buds.push_setting(m.sv_bool(m.S_MONO, i % 2 == 0))
+                r.buds.push_runtime(runtime_payload(case=None, left=(40 + i % 2, 2)))
+            r.buds.push_setting(m.sv_bool(m.S_MONO, True))
+            r.buds.push_runtime(runtime_payload(case=None, left=(77, 2)))
+
+        later(0.1, flood)
+        later(1.5, r.close_stdin)
+        with _StopCatcher():
+            r.session.run()
+        pushed = [e["type"] for e in r.out.events()[before:] if e["type"] in ("state", "controls")]
+        self.assertLessEqual(pushed.count("state"), 8, pushed)
+        self.assertLessEqual(pushed.count("controls"), 8, pushed)
+        self.assertEqual(r.last("state")["status"]["left"], 77)            # latest value still arrives
+        self.assertEqual(r.last("controls")["controls"]["ctl_mono"], "true")
+
+    def test_unchanged_controls_are_not_resent(self):
+        r = self.rig
+        r.session.start()
+        later(0.1, lambda: r.buds.push_setting(m.sv_bool(m.S_MONO, True)))
+        later(0.5, lambda: r.buds.push_setting(m.sv_bool(m.S_MONO, True)))
+        later(1.0, r.close_stdin)
+        with _StopCatcher():
+            r.session.run()
+        self.assertEqual(len(r.out.of("controls")), 1)
+
     def test_disconnect_mid_operation_stands_down_at_once(self):
         r = self.rig
         r.session.start()
@@ -567,6 +601,21 @@ class CaseCacheTests(EnvCase):
         self.assertTrue(os.path.isfile(leaf) and not os.path.islink(leaf))
         with open(target) as f:
             self.assertEqual(f.read(), "50 999999\n")         # rename replaced the link only
+
+    def test_changed_case_level_writes_are_spaced(self):
+        now = [1000.0]
+        cache = bridge.CaseCache(wall=lambda: now[0])
+        leaf = os.path.join(self.state, "omarchy-pixelbuds", "case")
+        cache.update(50)
+        first = os.stat(leaf).st_mtime_ns
+        for i in range(50):                       # alternating levels, 50 times in 5 s
+            now[0] += 0.1
+            cache.update(51 + i % 2)
+        self.assertEqual(os.stat(leaf).st_mtime_ns, first)
+        now[0] = 1000.0 + bridge.CASE_MIN_WRITE + 1
+        cache.update(60)
+        with open(leaf) as f:
+            self.assertEqual(f.read().split()[0], "60")
 
 
 if __name__ == "__main__":

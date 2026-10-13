@@ -31,6 +31,7 @@ Item {
 
   // Distro identities. Never ambient PATH.
   readonly property string python3Bin: "/usr/bin/python3"
+  readonly property string omarchyShellBin: "/usr/bin/omarchy-shell"
   readonly property string trustedPath: "/usr/bin:/bin"
   readonly property string bridgePath: Model.localPath(Qt.resolvedUrl("bridge/pixelbuds_bridge.py"))
 
@@ -49,6 +50,10 @@ Item {
   property bool _stopping: false
   property string _byeReason: ""
   property int _failures: 0
+  property int _ancRequest: 0          // id of the latest set_anc / cycle_anc
+  property string _budsAddr: ""        // last buds address a session reported
+  property double _lastEventLaunch: 0
+  property int _osdValue: -1
   property double _lastRefresh: 0
 
   // Allowlist only. clearEnvironment drops PYTHON*, LD_* and ambient PATH
@@ -150,6 +155,7 @@ Item {
         return ev.v === Model.PROTOCOL_VERSION
       case "state":
         status = Model.sanitizeStatus(ev.status)
+        if (status.addr) _budsAddr = status.addr
         if (pendingAnc !== "" && status.anc === pendingAnc) pendingAnc = ""
         return true
       case "controls":
@@ -160,7 +166,10 @@ Item {
         _failures = 0
         return true
       case "result":
-        if (ev.cmd === "set_anc" || ev.cmd === "cycle_anc") { if (ev.ok !== true) pendingAnc = "" }
+        // Only the reply to the latest mode request may clear its pending
+        // mode; an older request finishing late must not.
+        if ((ev.cmd === "set_anc" || ev.cmd === "cycle_anc") && ev.id === _ancRequest && ev.ok !== true)
+          pendingAnc = ""
         if (ev.cmd === "controls") readingControls = false
         return true
       case "bye":
@@ -201,14 +210,19 @@ Item {
 
   function setAnc(mode) {
     if (ancModes.indexOf(mode) < 0) return
-    if (send({ cmd: "set_anc", mode: mode })) pendingAnc = mode
+    var id = _nextId
+    if (send({ cmd: "set_anc", mode: mode })) {
+      _ancRequest = id
+      pendingAnc = mode
+    }
   }
 
   function cycleAnc(delta) {
     // The buds cycle their own configured hold-gesture loop, so a click and
     // a physical long press always agree.
     pendingAnc = ""
-    send({ cmd: "cycle_anc", direction: delta < 0 ? "prev" : "next" })
+    var id = _nextId
+    if (send({ cmd: "cycle_anc", direction: delta < 0 ? "prev" : "next" })) _ancRequest = id
   }
 
   // key is one of the bridge's setting names; fields carry typed values,
@@ -255,14 +269,61 @@ Item {
   // to the shell. A device going down that is ours (or when we cannot tell)
   // stops the session at once, so nothing of ours holds a leaving link open;
   // the bridge also watches its own device on the bus.
+  // Only our own buds reset the retry limit; other devices cannot keep
+  // re-arming it. Any device may still be new buds, so any event schedules a
+  // (rate-limited) bridge start, which exits at once if no buds are present.
   function onDeviceEvent(address, up) {
-    if (up) {
-      _failures = 0
-    } else if (!status.addr || address === status.addr) {
+    var ours = _budsAddr !== "" && address === _budsAddr
+    if (!up && (!status.addr || address === status.addr)) {
       abort()
+      if (ours) _failures = 0
+    } else if (up && ours) {
       _failures = 0
     }
-    eventDebounce.restart()
+    if (!eventDebounce.running) eventDebounce.start()
+  }
+
+  // Volume OSD for every bar: coalesced, one omarchy-shell process at a time,
+  // at most once per osdTimer interval, always showing the latest level.
+  function showVolumeOsd(percent) {
+    if (!connected || !Model.intIn(percent, 0, 100)) return
+    _osdValue = percent
+    if (!osdTimer.running) osdTimer.start()
+  }
+
+  // Allowlist only, for the OSD helper (it talks to the running shell).
+  function osdEnvironment() {
+    var env = launchEnvironment()
+    var pass = ["XDG_SESSION_TYPE", "XDG_SESSION_ID", "WAYLAND_DISPLAY", "DISPLAY",
+                "HYPRLAND_INSTANCE_SIGNATURE", "OMARCHY_PATH", "DBUS_SESSION_BUS_ADDRESS"]
+    for (var i = 0; i < pass.length; i++) {
+      var value = Quickshell.env(pass[i])
+      if (value !== undefined && value !== null && String(value) !== "")
+        env[pass[i]] = String(value)
+    }
+    return env
+  }
+
+  Timer {
+    id: osdTimer
+    interval: 100
+    onTriggered: {
+      if (osdProc.running) { osdTimer.start(); return }
+      if (root._osdValue < 0) return
+      osdProc.environment = root.osdEnvironment()
+      osdProc.command = [root.omarchyShellBin, "osd", "show", JSON.stringify({
+        icon: Model.volumeIcon(root._osdValue),
+        value: root._osdValue
+      })]
+      root._osdValue = -1
+      osdProc.running = true
+    }
+  }
+
+  Process {
+    id: osdProc
+    clearEnvironment: true
+    environment: ({})
   }
 
   Instantiator {
@@ -276,10 +337,18 @@ Item {
     }
   }
 
+  // BlueZ events start the bridge at most once per 3 s, however many arrive.
   Timer {
     id: eventDebounce
     interval: 400
-    onTriggered: root.ensureBridge()
+    onTriggered: {
+      var wait = root._lastEventLaunch + 3000 - Date.now()
+      if (wait > 0) { interval = wait; start(); return }
+      interval = 400
+      if (bridge.running) return
+      root._lastEventLaunch = Date.now()
+      root.ensureBridge()
+    }
   }
 
   Component.onCompleted: ensureBridge()
