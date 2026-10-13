@@ -1004,7 +1004,7 @@ class CaseCache:
         self.pending = None         # a changed level not yet written
 
     def _put(self, dfd, pct):
-        casecache.put(dfd, pct)
+        casecache.put(dfd, pct, int(self.wall()))
         self.last_put = (pct, self.clock())
         self.pending = None
 
@@ -1183,14 +1183,14 @@ def main(argv=None, make_bluez=BluezGio, stdin_fd=0, stdout=None):
     except Exception:
         reason, detail = "error", "internal error"
     finally:
-        if session is not None:
-            session.cache.flush()
         if sock is not None:
             try:
                 sock.shutdown(socket.SHUT_RDWR)
             except OSError:
                 pass
             sock.close()
+        if session is not None:
+            session.cache.flush()   # after the link is released, never before
         if bluez is not None:
             bluez.close()
         if lock_fd is not None:

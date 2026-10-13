@@ -419,6 +419,22 @@ class MainLifecycle(EnvCase):
         os.close(r)
         return code, out
 
+    def test_link_is_released_before_the_cache_is_written(self):
+        # Standing down must not wait on a disk write: the RFCOMM link goes
+        # first, the held-back case level after.
+        fake = FakeBluez()
+        seen = []
+        original = bridge.CaseCache.flush
+
+        def flush(cache):
+            seen.append(fake.buds.stopped.wait(1.0))   # buds already saw EOF?
+            original(cache)
+
+        bridge.CaseCache.flush = flush
+        self.addCleanup(setattr, bridge.CaseCache, "flush", original)
+        self.run_main(fake, close_after=1.0)
+        self.assertEqual(seen, [True])
+
     def test_absent(self):
         fake = FakeBluez()
         fake.device = None

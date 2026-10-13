@@ -104,14 +104,15 @@ def get(dfd):
     return pct, ts
 
 
-def put(dfd, pct):
+def put(dfd, pct, stamp=None):
     if not 0 <= pct <= 100:
         return
+    stamp = int(time.time()) if stamp is None else int(stamp)
     tmp = ".case.%d.%d" % (os.getpid(), int.from_bytes(os.urandom(4), "big"))
     fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW | os.O_CLOEXEC,
                  0o600, dir_fd=dfd)
     try:
-        os.write(fd, ("%d %d\n" % (pct, int(time.time()))).encode("ascii"))
+        os.write(fd, ("%d %d\n" % (pct, stamp)).encode("ascii"))
         os.fsync(fd)
     except OSError:
         os.close(fd)

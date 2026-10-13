@@ -154,11 +154,14 @@ layer of [pbpctrl](https://github.com/qzed/pbpctrl).
   (`Quickshell.Bluetooth`, the same one Omarchy's Bluetooth panel uses), so
   the plugin reads no BlueZ output of its own.
 - On a connect event it starts `/usr/bin/python3 -I -B bridge/pixelbuds_bridge.py`.
-  The bridge finds the connected device that advertises the Maestro UUID
-  (never by name, so a renamed pair is still found and a look-alike headset
-  is not), and talks to it only while BlueZ reports it `Connected` (a pair
-  whose `ServicesResolved` stays false gets a short settle window first). It registers a client-role BlueZ `Profile1` for the
-  Maestro UUID and calls `Device1.ConnectProfile`; BlueZ does the SDP lookup
+  The bridge picks the connected device that advertises the Maestro UUID,
+  never by name: a renamed pair is still found, and a headset that is merely
+  named "Pixel Buds" is not. (A paired device that advertises the Maestro
+  UUID itself is treated as buds; everything it sends is bounded and
+  validated before it reaches the bar.) The bridge talks to the device only
+  while BlueZ reports it `Connected`; a pair whose `ServicesResolved` stays
+  false gets a short settle window first. It registers a client-role BlueZ
+  `Profile1` for the Maestro UUID and calls `Device1.ConnectProfile`; BlueZ does the SDP lookup
   and hands over the RFCOMM socket. That is the same path pbpctrl uses.
 - The bridge holds that one session while the buds stay connected: it reads
   the initial state, subscribes to the buds' runtime-info (battery,
