@@ -48,7 +48,9 @@ CONFIG = """<!DOCTYPE busconfig PUBLIC "-//freedesktop//DTD D-Bus Bus Configurat
 
 
 @unittest.skipUnless(HAVE_GI and os.access(DBUS_DAEMON, os.X_OK), "needs dbus-daemon and PyGObject")
-class BridgeOverPrivateBus(unittest.TestCase):
+class PrivateBusCase(unittest.TestCase):
+    """A private dbus-daemon with the fake org.bluez on it. No tests here."""
+
     def setUp(self):
         self.tmp = tempfile.mkdtemp()
         self.addCleanup(shutil.rmtree, self.tmp, True)
@@ -101,6 +103,12 @@ class BridgeOverPrivateBus(unittest.TestCase):
                                  Gio.DBusCallFlags.NONE, 5000, None)
         return res.unpack()[0] if reply else None
 
+    def control_args(self, method, args):
+        self.bus.call_sync("org.bluez", "/org/bluez/hci0/dev_AA_BB_CC_DD_EE_FF", "test.Control",
+                           method, args, None, Gio.DBusCallFlags.NONE, 5000, None)
+
+
+class BridgeOverPrivateBus(PrivateBusCase):
     def start_bridge(self):
         proc = subprocess.Popen(["/usr/bin/python3", "-I", "-B", BRIDGE], stdin=subprocess.PIPE,
                                 stdout=subprocess.PIPE, stderr=subprocess.PIPE, env=self.env)

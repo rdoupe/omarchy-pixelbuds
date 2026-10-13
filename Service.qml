@@ -1,11 +1,17 @@
 import QtQuick
+import QtQml.Models
 import Quickshell
+import Quickshell.Bluetooth
 import Quickshell.Io
 import "Model.js" as Model
 
 // One instance per shell (manifest kind "service"), shared by the bar widget
 // on every monitor, so there is exactly one bridge and one Maestro session
 // no matter how many bars show the widget.
+//
+// Connect/disconnect events come from the shell's own BlueZ client
+// (Quickshell.Bluetooth), the same one Omarchy's Bluetooth panel uses, so the
+// plugin parses no BlueZ output of its own.
 //
 // The bridge (bridge/pixelbuds_bridge.py) is started only on BlueZ connect
 // events, holds a single RFCOMM session while the buds stay connected and
@@ -25,7 +31,6 @@ Item {
 
   // Distro identities. Never ambient PATH.
   readonly property string python3Bin: "/usr/bin/python3"
-  readonly property string gdbusBin: "/usr/bin/gdbus"
   readonly property string trustedPath: "/usr/bin:/bin"
   readonly property string bridgePath: Model.localPath(Qt.resolvedUrl("bridge/pixelbuds_bridge.py"))
 
@@ -246,44 +251,28 @@ Item {
     onTriggered: root.ensureBridge()
   }
 
-  // Connect/disconnect is event-driven: a plain signal subscription on the
-  // system bus (no BecomeMonitor, no privileges). gdbus prints one line per
-  // signal, beginning with the object path.
-  Process {
-    id: bluezMonitor
-    command: [root.gdbusBin, "monitor", "--system", "--dest", "org.bluez"]
-    clearEnvironment: true
-    environment: ({})
-    stdout: SplitParser {
-      onRead: function(line) {
-        if (line.length > 4096) return
-        var leaving = line.indexOf("'Connected': <false>") >= 0
-            || line.indexOf("'ServicesResolved': <false>") >= 0
-        if (leaving) {
-          // A device is going away. If it is ours (or we cannot tell), stop
-          // the session immediately so nothing of ours holds the link open.
-          var ours = root.status.addr ? "dev_" + String(root.status.addr).replace(/:/g, "_") : ""
-          var path = line.split(":")[0]
-          if (ours === "" || path.indexOf("/org/bluez/") !== 0 || path.indexOf(ours) >= 0) {
-            root.abort()
-            root._failures = 0
-          }
-          eventDebounce.restart()
-        } else if (line.indexOf("'Connected'") >= 0 || line.indexOf("'ServicesResolved'") >= 0) {
-          root._failures = 0
-          eventDebounce.restart()
-        }
-      }
+  // Connect/disconnect is event-driven: one watcher per BlueZ device known
+  // to the shell. A device going down that is ours (or when we cannot tell)
+  // stops the session at once, so nothing of ours holds a leaving link open;
+  // the bridge also watches its own device on the bus.
+  function onDeviceEvent(address, up) {
+    if (up) {
+      _failures = 0
+    } else if (!status.addr || address === status.addr) {
+      abort()
+      _failures = 0
     }
-    onExited: monitorRestart.start()
+    eventDebounce.restart()
   }
 
-  Timer {
-    id: monitorRestart
-    interval: 3000
-    onTriggered: {
-      bluezMonitor.environment = root.launchEnvironment()
-      bluezMonitor.running = true
+  Instantiator {
+    model: Bluetooth.devices
+    delegate: QtObject {
+      required property var modelData
+      readonly property bool linked: modelData.connected
+      readonly property bool leaving: modelData.state === BluetoothDeviceState.Disconnecting
+      onLinkedChanged: root.onDeviceEvent(modelData.address, linked)
+      onLeavingChanged: if (leaving) root.onDeviceEvent(modelData.address, false)
     }
   }
 
@@ -293,11 +282,7 @@ Item {
     onTriggered: root.ensureBridge()
   }
 
-  Component.onCompleted: {
-    bluezMonitor.environment = root.launchEnvironment()
-    bluezMonitor.running = true
-    ensureBridge()
-  }
+  Component.onCompleted: ensureBridge()
 
   Component.onDestruction: {
     restartTimer.stop()

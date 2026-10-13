@@ -45,7 +45,11 @@ for f in "$panel" "$service"; do
   ! grep -q '"-c"' "$f" || fail "$f passes a command string"
 done
 grep -q 'readonly property string python3Bin: "/usr/bin/python3"' "$service" || fail "Service.qml missing /usr/bin/python3"
-grep -q 'readonly property string gdbusBin: "/usr/bin/gdbus"' "$service" || fail "Service.qml missing /usr/bin/gdbus"
+# BlueZ events come from the shell's own client; the only process the
+# service launches is the bridge, and it parses no BlueZ text output.
+grep -q '^import Quickshell.Bluetooth$' "$service" || fail "Service.qml must use Quickshell.Bluetooth for BlueZ events"
+! grep -q 'gdbus' "$service" || fail "Service.qml must not read gdbus output"
+[ "$(grep -c '^  Process {' "$service")" -eq 1 ] || fail "Service.qml must launch only the bridge"
 grep -q 'readonly property string omarchyShellBin: "/usr/bin/omarchy-shell"' "$panel" || fail "Panel.qml missing /usr/bin/omarchy-shell"
 grep -q 'command: \[root.python3Bin, "-I", "-B", root.bridgePath\]' "$service" || fail "bridge must be launched as python3 -I -B"
 grep -q 'splitMarker: ""' "$service" || fail "bridge stdout must be read as bounded chunks"

@@ -6,6 +6,12 @@ there is nothing else to install or build.
 
 ![screenshot](preview.png)
 
+## What's new in 2.0.2
+
+- **Native Bluetooth events.** Connects and disconnects now come from the
+  shell's built-in Bluetooth client instead of a separate `gdbus monitor`
+  process, so the plugin runs one process fewer and parses no BlueZ output.
+
 ## What's new in 2.0.1
 
 - **Buds that were already connected now show up.** Some Pixel Buds Pro 2
@@ -66,7 +72,7 @@ omarchy restart shell
   volume-dependent EQ and mono audio. Device toggles and touch controls live
   in the collapsed **Advanced** section below it.
 - **Low battery** turns a battery row the urgent color at 20% or less.
-- **Event-driven**: subscribes to BlueZ D-Bus signals via `gdbus`, so the icon
+- **Event-driven**: follows BlueZ through the shell's own Bluetooth client, so the icon
   appears within about a second of the buds connecting; battery and mode
   changes are pushed by the buds over one long-lived session, and while
   they're disconnected the plugin polls nothing at all.
@@ -79,8 +85,8 @@ thing.
 Nothing beyond a standard Omarchy install. Everything below is already part
 of Omarchy's base packages:
 
-- `python3` with its PyGObject (`python-gobject`) bindings, BlueZ, and
-  glib2's `gdbus` — all part of Omarchy's base packages.
+- `python3` with its PyGObject (`python-gobject`) bindings and BlueZ, both
+  part of Omarchy's base packages.
 - Pixel Buds that expose Google's Maestro service (Pixel Buds Pro and Pixel
   Buds Pro 2).
 
@@ -137,13 +143,15 @@ bundled, standard-library Python bridge (`bridge/`), a port of the protocol
 layer of [pbpctrl](https://github.com/qzed/pbpctrl).
 
 - `Service.qml` is a single shell-wide service, so there is exactly one bridge
-  and one Maestro session however many monitors show the widget. It
-  subscribes to BlueZ signals with `gdbus monitor --system --dest org.bluez`.
+  and one Maestro session however many monitors show the widget. It follows
+  connects and disconnects through the shell's own BlueZ client
+  (`Quickshell.Bluetooth`, the same one Omarchy's Bluetooth panel uses), so
+  the plugin reads no BlueZ output of its own.
 - On a connect event it starts `/usr/bin/python3 -I -B bridge/pixelbuds_bridge.py`.
   The bridge finds the connected device that advertises the Maestro UUID
   (never by name, so a renamed pair is still found and a look-alike headset
-  is not), and talks to it only if BlueZ reports it both `Connected` and
-  `ServicesResolved`. It registers a client-role BlueZ `Profile1` for the
+  is not), and talks to it only while BlueZ reports it `Connected` (a pair
+  whose `ServicesResolved` stays false gets a short settle window first). It registers a client-role BlueZ `Profile1` for the
   Maestro UUID and calls `Device1.ConnectProfile`; BlueZ does the SDP lookup
   and hands over the RFCOMM socket. That is the same path pbpctrl uses.
 - The bridge holds that one session while the buds stay connected: it reads
