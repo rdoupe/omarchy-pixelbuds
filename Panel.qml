@@ -3,6 +3,7 @@ import Quickshell
 import Quickshell.Io
 import Quickshell.Services.Pipewire
 import qs.Commons
+import qs.Commons as Commons
 import qs.Ui
 import "Model.js" as Model
 
@@ -42,7 +43,7 @@ Panel {
   // Distro identity for the OSD helper. Never ambient PATH.
   readonly property int pollInterval: Math.max(5, parseInt(setting("pollIntervalSec", 30)) || 30) * 1000
   readonly property bool hideWhenDisconnected: String(setting("hideWhenDisconnected", true)) === "true"
-  readonly property color urgentColor: bar ? bar.urgent : Color.urgent
+  readonly property color urgentColor: bar ? bar.urgent : Commons.Color.urgent
   // Device-supplied; only trusted as five finite numbers, else no EQ rows.
   readonly property var eqBands: {
     if (controls.ctl_eq === undefined) return []
@@ -83,7 +84,7 @@ Panel {
   readonly property var ancGestureModes: String(controls.ctl_anc_gesture_loop || "")
       .split(",").filter(function(x) { return x !== "" })
 
-  readonly property color fg: bar ? bar.foreground : Color.foreground
+  readonly property color fg: bar ? bar.foreground : Commons.Color.foreground
   readonly property string fontFamily: bar ? bar.fontFamily : Style.font.family
 
   function refresh() { if (svc) svc.refresh() }
@@ -691,7 +692,7 @@ Panel {
           width: parent.width
           wrapMode: Text.WordWrap
           text: String(root.status.error || "")
-          color: root.bar ? root.bar.urgent : Color.urgent
+          color: root.bar ? root.bar.urgent : Commons.Color.urgent
           font.family: root.fontFamily
           font.pixelSize: Style.font.caption
         }

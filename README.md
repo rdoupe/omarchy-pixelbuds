@@ -6,6 +6,13 @@ there is nothing else to install or build.
 
 ![screenshot](preview.png)
 
+## What's new in 2.0.3
+
+- **Works on Omarchy 4.0.5 (Qt 6.12).** Qt 6.12 adds its own `Color` type,
+  which hid the shell palette from the plugin, so its fallback colors came
+  out black. The plugin now reads the palette as `Commons.Color`, as
+  Omarchy's shell docs require; it still works on Omarchy 4.0.4 (Qt 6.11).
+
 ## What's new in 2.0.2
 
 - **Native Bluetooth events.** Connects and disconnects now come from the

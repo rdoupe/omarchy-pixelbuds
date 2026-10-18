@@ -68,6 +68,16 @@ for f in "$panel"; do
   [ "$texts" -le "$plain" ] || fail "$f has Text without textFormat: Text.PlainText ($texts Text, $plain PlainText)"
 done
 
+# Qt 6.12 has its own Color type, so a bare Color is no longer the shell
+# palette: every palette reference goes through the qs.Commons alias.
+for f in "$repo"/*.qml "$repo"/*.js; do
+  ! grep -nE '(^|[^.[:alnum:]_])Color\.' "$f" | grep -v 'Commons\.Color\.' || fail "$f uses the bare Color palette (use Commons.Color)"
+  ! grep -nE 'target: *Color\b' "$f" || fail "$f connects to the bare Color palette (use Commons.Color)"
+  if grep -q 'Commons\.Color' "$f"; then
+    grep -q '^import qs.Commons as Commons$' "$f" || fail "$f uses Commons.Color without the qs.Commons alias import"
+  fi
+done
+
 # --- Python helpers ---
 for f in "$bridge" "$cache"; do
   case "$(head -n1 "$f")" in
